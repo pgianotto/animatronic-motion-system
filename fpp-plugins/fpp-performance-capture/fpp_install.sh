@@ -63,5 +63,17 @@ sudo systemctl daemon-reload
 sudo systemctl enable fpp-performance-capture.service
 sudo systemctl start  fpp-performance-capture.service
 
+# ── Apache proxy (avoids FPP CSP blocking cross-port requests) ───────────────
+sudo a2enmod proxy proxy_http 2>/dev/null || true
+cat > /tmp/fpp-capture-proxy.conf << 'EOF'
+<IfModule mod_proxy.c>
+    ProxyPass        /fpp-capture-api/ http://localhost:5002/ flushpackets=on
+    ProxyPassReverse /fpp-capture-api/ http://localhost:5002/
+</IfModule>
+EOF
+sudo cp /tmp/fpp-capture-proxy.conf /etc/apache2/conf-available/fpp-capture-proxy.conf
+sudo a2enconf fpp-capture-proxy 2>/dev/null || true
+sudo systemctl reload apache2 2>/dev/null || true
+
 echo "Performance Capture plugin installed. Daemon running on port 5002."
 echo "Access via FPP menu: Plugins > Animatronic Capture"

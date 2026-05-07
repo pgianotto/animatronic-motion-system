@@ -65,5 +65,17 @@ sudo systemctl daemon-reload
 sudo systemctl enable fpp-live-follow.service
 sudo systemctl start  fpp-live-follow.service
 
+# ── Apache proxy (avoids FPP CSP blocking cross-port requests) ───────────────
+sudo a2enmod proxy proxy_http 2>/dev/null || true
+cat > /tmp/fpp-live-follow-proxy.conf << 'EOF'
+<IfModule mod_proxy.c>
+    ProxyPass        /fpp-live-follow-api/ http://localhost:5001/ flushpackets=on
+    ProxyPassReverse /fpp-live-follow-api/ http://localhost:5001/
+</IfModule>
+EOF
+sudo cp /tmp/fpp-live-follow-proxy.conf /etc/apache2/conf-available/fpp-live-follow-proxy.conf
+sudo a2enconf fpp-live-follow-proxy 2>/dev/null || true
+sudo systemctl reload apache2 2>/dev/null || true
+
 echo "Live Follow plugin installed. Daemon running on port 5001."
 echo "Access via FPP menu: Plugins > Animatronic Live Follow"

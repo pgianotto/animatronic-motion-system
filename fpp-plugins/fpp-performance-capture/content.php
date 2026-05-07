@@ -49,7 +49,7 @@ $dur       = $status['duration_str'] ?? '00:00.0';
   <!-- Camera stream -->
   <div class="pc-card" style="flex:1; min-width:0;">
     <h3>Camera Feed</h3>
-    <img src="http://<?= $_SERVER['HTTP_HOST'] ?>:5002/stream"
+    <img src="/fpp-capture-api/stream"
          class="pc-stream" style="width:100%;"
          onerror="this.style.display='none'">
   </div>
@@ -152,7 +152,7 @@ $dur       = $status['duration_str'] ?? '00:00.0';
 </div>
 
 <script>
-const API = 'http://' + location.hostname + ':5002';
+const API = '/fpp-capture-api';
 
 function recStart() {
   fetch(API + '/api/record/start', {method:'POST'}).then(pollStatus);

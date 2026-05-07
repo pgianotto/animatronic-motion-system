@@ -65,7 +65,7 @@ $hw_type      = $cfg['hardware_type']   ?? 'mock';
 <!-- Camera feed -->
 <div class="af-card">
   <h3>Camera Feed</h3>
-  <img src="http://<?= $_SERVER['HTTP_HOST'] ?>:5001/stream"
+  <img src="/fpp-live-follow-api/stream"
        class="af-stream" id="cam-stream"
        onerror="this.style.display='none'; document.getElementById('cam-error').style.display='block'">
   <div id="cam-error" style="display:none; color:#e63946; font-size:13px; padding:8px 0;">
@@ -187,7 +187,7 @@ $hw_type      = $cfg['hardware_type']   ?? 'mock';
 </div><!-- /max-width -->
 
 <script>
-const API = 'http://' + location.hostname + ':5001';
+const API = '/fpp-live-follow-api';
 
 function sendCmd(endpoint) {
   fetch(API + endpoint, {method:'POST'})
