@@ -22,7 +22,7 @@ export PATH="$HOME/.local/bin:$PATH"
 rm -rf "$PLUGIN_DIR/venv"
 uv venv --python 3.11 "$PLUGIN_DIR/venv"
 uv pip install --python "$PLUGIN_DIR/venv/bin/python" \
-    flask "mediapipe==0.10.9"
+    flask pyyaml "mediapipe==0.10.9"
 
 # ── Copy shared Python core from parent project ──────────────────────────────
 PARENT="$(cd "$PLUGIN_DIR/../.." && pwd)"
