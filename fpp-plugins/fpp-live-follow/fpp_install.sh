@@ -9,16 +9,24 @@ echo "Installing Animatronic Live Follow plugin..."
 
 # ── System packages ──────────────────────────────────────────────────────────
 sudo apt-get update -qq
-sudo apt-get install -y python3-pip python3-opencv libcap2 v4l-utils
+sudo apt-get install -y python3-pip python3-opencv libcap2 v4l-utils curl
 
-# ── Python virtual environment ───────────────────────────────────────────────
-sudo apt-get install -y python3-venv python3-full
-python3 -m venv "$PLUGIN_DIR/venv" --system-site-packages
-"$PLUGIN_DIR/venv/bin/pip" install --quiet flask mediapipe RPi.GPIO 2>/dev/null || \
-    "$PLUGIN_DIR/venv/bin/pip" install --quiet flask mediapipe
+# ── uv (fast Python installer) ───────────────────────────────────────────────
+if ! command -v uv &>/dev/null; then
+    curl -LsSf https://astral.sh/uv/install.sh | sh
+    export PATH="$HOME/.local/bin:$PATH"
+fi
+export PATH="$HOME/.local/bin:$PATH"
+
+# ── Python 3.11 venv (mediapipe has no 3.13 wheels yet) ─────────────────────
+rm -rf "$PLUGIN_DIR/venv"
+uv venv --python 3.11 "$PLUGIN_DIR/venv"
+uv pip install --python "$PLUGIN_DIR/venv/bin/python" \
+    flask "mediapipe==0.10.9" RPi.GPIO 2>/dev/null || \
+uv pip install --python "$PLUGIN_DIR/venv/bin/python" \
+    flask "mediapipe==0.10.9"
 
 # ── Copy shared Python core from parent project ──────────────────────────────
-# Works whether the plugin is inside the project tree or installed standalone.
 PARENT="$(cd "$PLUGIN_DIR/../.." && pwd)"
 mkdir -p "$LIB_DIR"
 
@@ -31,9 +39,7 @@ for d in core modes xlights; do
     fi
 done
 
-if [ -f "$PARENT/config.yaml" ]; then
-    cp "$PARENT/config.yaml" "$LIB_DIR/config.yaml"
-fi
+[ -f "$PARENT/config.yaml" ] && cp "$PARENT/config.yaml" "$LIB_DIR/config.yaml"
 
 # ── systemd service ──────────────────────────────────────────────────────────
 cat > /tmp/fpp-live-follow.service << 'EOF'
