@@ -1,0 +1,21 @@
+# Default: normalize to LF on commit, checkout as-is
+* text=auto
+
+# Shell scripts and Python must have LF on the Pi
+*.sh text eol=lf
+*.py text eol=lf
+callbacks text eol=lf
+
+# PHP/JSON: LF is fine everywhere
+*.php text eol=lf
+*.json text eol=lf
+*.yaml text eol=lf
+*.inc text eol=lf
+
+# Windows-only files can keep CRLF
+*.txt text eol=crlf
+
+# Binaries
+*.fseq binary
+*.jpg binary
+*.png binary

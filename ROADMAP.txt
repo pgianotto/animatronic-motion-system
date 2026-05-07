@@ -1,0 +1,85 @@
+ANIMATRONIC MOTION TRACKING SYSTEM - ROADMAP
+=============================================
+
+HOW TO LAUNCH
+--------------
+  python "z:\Python Projects\Motion Tracking Animatronic\main.py"
+
+  Or if your terminal is already in the project folder:
+  python main.py
+
+  On Raspberry Pi (same command, hardware.type in config.yaml handles the rest):
+  python3 main.py
+
+
+PHASE 1 - CORE FOUNDATION
+---------------------------
+[x] Project structure and architecture
+[x] Camera input module (core/camera.py)
+[x] MediaPipe face/head pose + expression tracking (core/tracker.py)
+[x] Servo controller abstraction — PCA9685, GPIO, Serial, Mock (core/servo_controller.py)
+[x] YAML configuration system (config.yaml)
+
+PHASE 2 - LIVE TRACKING MODE
+------------------------------
+[x] PID controller for smooth servo movement
+[x] Pan servo: keep subject horizontally centered
+[x] Tilt servo: keep subject vertically centered
+[x] Deadzone to prevent jitter
+[x] Speed limiting per servo
+
+PHASE 3 - MOTION CAPTURE MODE
+-------------------------------
+[x] Head pose estimation (yaw, pitch, roll) via MediaPipe face mesh + solvePnP
+[x] Facial expression tracking: mouth open, left/right eyes, eyebrows
+[x] Exponential smoothing for stable servo output
+[x] Real-time servo preview (animatronic mirrors your movements while recording)
+[x] Session recording with per-frame timestamps
+[ ] Playback / scrub review before export
+[ ] Body pose tracking (shoulders, arms) via MediaPipe Pose
+
+PHASE 4 - XLIGHTS INTEGRATION
+-------------------------------
+[x] FSEQ v2 binary file writer (xlights/fseq_writer.py)
+[x] Per-channel min/max input range mapping -> 0-255 DMX
+[x] Resample captured frames to sequence step time
+[x] Export recorded session as .fseq importable by xLights
+[ ] Import .fseq for animatronic playback
+[ ] Timing/BPM alignment option
+
+PHASE 5 - GUI APPLICATION
+---------------------------
+[x] Tabbed interface: Live Tracking | Motion Capture | Settings
+[x] Live camera feed with face mesh landmark overlay
+[x] Servo position readout (pan + tilt)
+[x] Record / Stop / Export FSEQ controls
+[x] Real-time tracked value dashboard
+[x] Hardware config + xLights channel map editor in Settings tab
+[ ] Waveform preview of recorded channels
+
+PHASE 6 - DEPLOYMENT
+----------------------
+[ ] Raspberry Pi deployment guide
+[ ] Auto-start on boot (systemd service)
+[ ] Web remote control interface (optional)
+[ ] Multi-animatronic support via multiple serial ports (optional)
+
+HARDWARE TARGETS
+-----------------
+- Raspberry Pi 4 (primary deployment for live tracking)
+- Windows PC (motion capture / sequence programming tool)
+- USB camera (any UVC-compatible)
+- PCA9685 16-channel PWM servo driver (I2C, recommended for Pi)
+- Standard RC servos for pan/tilt
+- Optional: Arduino + serial bridge for more servo channels
+
+TRACKED VALUES -> XLIGHTS CHANNELS (DEFAULT MAPPING)
+------------------------------------------------------
+  head_yaw          -> ch 1  (Head Pan)
+  head_pitch        -> ch 2  (Head Tilt)
+  head_roll         -> ch 3  (Head Roll)
+  mouth_open        -> ch 4  (Jaw / Mouth)
+  left_eye_open     -> ch 5  (Left Eye)
+  right_eye_open    -> ch 6  (Right Eye)
+  left_eyebrow      -> ch 7  (Left Eyebrow)
+  right_eyebrow     -> ch 8  (Right Eyebrow)

@@ -1,0 +1,377 @@
+"""FPP Performance Capture daemon — port 5002.
+
+Handles recording, session save/load, playback, and FSEQ export directly
+into FPP's sequences folder so files appear in FPP's scheduler immediately.
+"""
+
+import json
+import os
+import sys
+import threading
+import time
+from pathlib import Path
+
+PLUGIN_DIR   = Path(__file__).parent
+LIB_DIR      = PLUGIN_DIR / 'lib'
+PROJECT_ROOT = PLUGIN_DIR.parent.parent
+
+for search in (LIB_DIR, PROJECT_ROOT):
+    if (search / 'core').exists():
+        sys.path.insert(0, str(search))
+        break
+
+import cv2
+import yaml
+from flask import Flask, Response, jsonify, request, send_file
+
+from core.camera import Camera
+from core.servo_controller import ServoController, create_backend
+from core.tracker import Tracker
+from modes.motion_capture import MotionCaptureMode
+from xlights.fseq_writer import export_fseq
+
+CFG_PATH  = Path('/home/fpp/media/config/animatronic_capture.json')
+FSEQ_DIR  = Path('/home/fpp/media/sequences')
+SESS_DIR  = Path('/home/fpp/media/animations')
+PORT      = 5002
+
+DEFAULTS = {
+    'smoothing':          0.4,
+    'step_time_ms':       50,
+    'camera_index':       0,
+    'camera_width':       640,
+    'camera_height':      480,
+    'hardware_type':      'pca9685',
+    'pca9685_address':    '0x40',
+    'pca9685_frequency':  50,
+    'channel_pan':        0,
+    'channel_tilt':       1,
+}
+
+def _load_cfg() -> dict:
+    if CFG_PATH.exists():
+        try:
+            return {**DEFAULTS, **json.loads(CFG_PATH.read_text())}
+        except Exception:
+            pass
+    for search in (LIB_DIR, PROJECT_ROOT):
+        yaml_path = search / 'config.yaml'
+        if yaml_path.exists():
+            try:
+                raw = yaml.safe_load(yaml_path.read_text())
+                m = dict(DEFAULTS)
+                m['smoothing']    = raw.get('motion_capture', {}).get('smoothing', 0.4)
+                m['step_time_ms'] = raw.get('xlights', {}).get('step_time_ms', 50)
+                m['camera_index'] = raw.get('camera', {}).get('index', 0)
+                m['camera_width'] = raw.get('camera', {}).get('width', 640)
+                m['camera_height']= raw.get('camera', {}).get('height', 480)
+                m['channels']     = raw.get('xlights', {}).get('channels', [])
+                hw = raw.get('hardware', {})
+                m['hardware_type']      = hw.get('type', 'mock')
+                m['pca9685_address']    = hw.get('pca9685_address', '0x40')
+                m['pca9685_frequency']  = hw.get('pca9685_frequency', 50)
+                ch = hw.get('channel_assignments', {})
+                m['channel_pan']  = ch.get('pan', 0)
+                m['channel_tilt'] = ch.get('tilt', 1)
+                return m
+            except Exception:
+                pass
+    return dict(DEFAULTS)
+
+def _save_cfg(cfg: dict):
+    CFG_PATH.parent.mkdir(parents=True, exist_ok=True)
+    CFG_PATH.write_text(json.dumps(cfg, indent=2))
+
+def _build_core_config(cfg: dict) -> dict:
+    return {
+        'camera':   {'index': cfg['camera_index'],
+                     'width': cfg['camera_width'],
+                     'height': cfg['camera_height'], 'fps': 30},
+        'hardware': {'type': cfg['hardware_type'],
+                     'pca9685_address':  cfg['pca9685_address'],
+                     'pca9685_frequency':cfg['pca9685_frequency'],
+                     'channel_assignments': {'pan': cfg['channel_pan'],
+                                             'tilt': cfg['channel_tilt']}},
+        'servos': {'pan': {}, 'tilt': {}},
+        'motion_capture': {'smoothing': cfg['smoothing']},
+        'xlights': {'step_time_ms': cfg['step_time_ms'],
+                    'channels': cfg.get('channels', [])},
+    }
+
+
+class CaptureDaemon:
+    def __init__(self):
+        self.cfg          = _load_cfg()
+        self._lock        = threading.Lock()
+        self._frame_lock  = threading.Lock()
+        self._latest_jpg  = b''
+        self._values      = {}
+
+        self._pb_thread: threading.Thread = None
+        self._pb_stop    = threading.Event()
+        self._pb_pause   = threading.Event()
+        self._pb_playing = False
+        self._pb_pos     = 0
+
+        self._start_components()
+        self._start_camera_thread()
+
+    def _start_components(self):
+        cc = _build_core_config(self.cfg)
+        hw = cc['hardware']
+        try:
+            backend = create_backend(hw)
+        except Exception:
+            from core.servo_controller import MockServoBackend
+            backend = MockServoBackend()
+        servos = ServoController(backend, cc['servos'], hw['channel_assignments'])
+        self._tracker = Tracker()
+        cam = cc['camera']
+        self._camera  = Camera(index=cam['index'], width=cam['width'], height=cam['height'])
+        self._tracker.start(cam['width'], cam['height'])
+        self._capture  = MotionCaptureMode(servos, cc)
+
+    def _start_camera_thread(self):
+        if not self._camera.start():
+            print('[Capture] Camera failed to open.')
+            return
+        self._cam_running = True
+        threading.Thread(target=self._cam_loop, daemon=True).start()
+
+    def _cam_loop(self):
+        while self._cam_running:
+            ok, frame = self._camera.read()
+            if not ok or frame is None:
+                continue
+            result = self._tracker.process(frame)
+            with self._lock:
+                vals = self._capture.update(result)
+                self._values = vals
+            display = self._tracker.draw_overlay(frame.copy(), result)
+            if self._capture.is_recording:
+                cv2.putText(display, '● REC', (10, 58),
+                            cv2.FONT_HERSHEY_SIMPLEX, 1.0, (30, 30, 220), 2)
+            _, buf = cv2.imencode('.jpg', display, [cv2.IMWRITE_JPEG_QUALITY, 70])
+            with self._frame_lock:
+                self._latest_jpg = buf.tobytes()
+
+    # ── Recording ────────────────────────────────────────────────────────────
+
+    def start_recording(self):
+        self._capture.start_recording()
+
+    def stop_recording(self):
+        self._capture.stop_recording()
+
+    # ── Playback ─────────────────────────────────────────────────────────────
+
+    def start_playback(self) -> bool:
+        frames = self._capture.get_frames()
+        if not frames:
+            return False
+        self._pb_stop.clear()
+        self._pb_pause.clear()
+        self._pb_playing = True
+        self._pb_pos     = 0
+        self._pb_thread  = threading.Thread(
+            target=self._playback_loop, args=(frames,), daemon=True)
+        self._pb_thread.start()
+        return True
+
+    def pause_playback(self):
+        if self._pb_pause.is_set():
+            self._pb_pause.clear()
+        else:
+            self._pb_pause.set()
+
+    def stop_playback(self):
+        self._pb_stop.set()
+        self._pb_pause.clear()
+        self._pb_playing = False
+
+    def _playback_loop(self, frames):
+        start      = time.time()
+        pause_since = None
+        total      = len(frames)
+        for i, frame in enumerate(frames):
+            if self._pb_stop.is_set():
+                break
+            while self._pb_pause.is_set() and not self._pb_stop.is_set():
+                if pause_since is None:
+                    pause_since = time.time()
+                time.sleep(0.02)
+            if pause_since is not None:
+                start += time.time() - pause_since
+                pause_since = None
+            if self._pb_stop.is_set():
+                break
+            target = start + frame.timestamp
+            wait = target - time.time()
+            if wait > 0:
+                time.sleep(wait)
+            if self._pb_stop.is_set():
+                break
+            self._capture.play_frame(frame.values)
+            self._pb_pos = i
+        self._pb_playing = False
+        self._pb_stop.clear()
+
+    # ── Export ───────────────────────────────────────────────────────────────
+
+    def export_fseq(self, filename: str) -> dict:
+        frames   = self._capture.get_frames()
+        if not frames:
+            return {'ok': False, 'error': 'No frames recorded'}
+        ch_map   = self.cfg.get('channels', [])
+        step_ms  = int(self.cfg.get('step_time_ms', 50))
+        FSEQ_DIR.mkdir(parents=True, exist_ok=True)
+        out_path = FSEQ_DIR / filename
+        try:
+            nf, nch = export_fseq(frames, ch_map, step_ms, str(out_path))
+            return {'ok': True, 'frames': nf, 'channels': nch,
+                    'duration': round(nf * step_ms / 1000, 2),
+                    'path': str(out_path)}
+        except Exception as exc:
+            return {'ok': False, 'error': str(exc)}
+
+    # ── Session save/load ────────────────────────────────────────────────────
+
+    def save_session(self, filename: str) -> dict:
+        frames = self._capture.get_frames()
+        if not frames:
+            return {'ok': False, 'error': 'No frames'}
+        SESS_DIR.mkdir(parents=True, exist_ok=True)
+        path = SESS_DIR / filename
+        try:
+            self._capture.save_session(str(path))
+            return {'ok': True, 'path': str(path), 'frames': len(frames)}
+        except Exception as exc:
+            return {'ok': False, 'error': str(exc)}
+
+    def load_session(self, filename: str) -> dict:
+        path = SESS_DIR / filename
+        if self._capture.load_session(str(path)):
+            return {'ok': True, 'frames': self._capture.frame_count,
+                    'duration': round(self._capture.duration, 2)}
+        return {'ok': False, 'error': f'Could not load {filename}'}
+
+    def list_sessions(self) -> list:
+        SESS_DIR.mkdir(parents=True, exist_ok=True)
+        return [p.name for p in sorted(SESS_DIR.glob('*.json'))]
+
+    def list_sequences(self) -> list:
+        FSEQ_DIR.mkdir(parents=True, exist_ok=True)
+        return [p.name for p in sorted(FSEQ_DIR.glob('*.fseq'))]
+
+    # ── Status ───────────────────────────────────────────────────────────────
+
+    def status(self) -> dict:
+        frames = self._capture.get_frames()
+        dur    = self._capture.duration
+        m, s   = divmod(dur, 60)
+        pb_ts  = frames[self._pb_pos].timestamp if (self._pb_playing and frames) else 0
+        return {
+            'recording':    self._capture.is_recording,
+            'playing':      self._pb_playing,
+            'paused':       self._pb_pause.is_set(),
+            'frame_count':  self._capture.frame_count,
+            'duration_str': f'{int(m):02d}:{s:04.1f}',
+            'pb_pos':       self._pb_pos,
+            'pb_timestamp': round(pb_ts, 2),
+            'values':       {k: round(v, 3) for k, v in self._values.items()},
+        }
+
+    def mjpeg_frames(self):
+        while True:
+            with self._frame_lock:
+                jpg = self._latest_jpg
+            if jpg:
+                yield (b'--frame\r\nContent-Type: image/jpeg\r\n\r\n'
+                       + jpg + b'\r\n')
+            time.sleep(0.033)
+
+
+# ── Flask ─────────────────────────────────────────────────────────────────────
+
+app    = Flask(__name__)
+daemon = CaptureDaemon()
+
+
+@app.route('/api/status')
+def api_status():
+    return jsonify(daemon.status())
+
+
+@app.route('/api/record/start', methods=['POST'])
+def api_rec_start():
+    daemon.start_recording()
+    return jsonify({'ok': True})
+
+@app.route('/api/record/stop', methods=['POST'])
+def api_rec_stop():
+    daemon.stop_recording()
+    return jsonify(daemon.status())
+
+@app.route('/api/playback/start', methods=['POST'])
+def api_pb_start():
+    ok = daemon.start_playback()
+    return jsonify({'ok': ok})
+
+@app.route('/api/playback/pause', methods=['POST'])
+def api_pb_pause():
+    daemon.pause_playback()
+    return jsonify({'ok': True})
+
+@app.route('/api/playback/stop', methods=['POST'])
+def api_pb_stop():
+    daemon.stop_playback()
+    return jsonify({'ok': True})
+
+@app.route('/api/export', methods=['POST'])
+def api_export():
+    data     = request.get_json(force=True, silent=True) or {}
+    filename = data.get('filename', 'capture.fseq')
+    if not filename.endswith('.fseq'):
+        filename += '.fseq'
+    return jsonify(daemon.export_fseq(filename))
+
+@app.route('/api/session/save', methods=['POST'])
+def api_sess_save():
+    data     = request.get_json(force=True, silent=True) or {}
+    filename = data.get('filename', 'session.json')
+    return jsonify(daemon.save_session(filename))
+
+@app.route('/api/session/load', methods=['POST'])
+def api_sess_load():
+    data     = request.get_json(force=True, silent=True) or {}
+    filename = data.get('filename', '')
+    return jsonify(daemon.load_session(filename))
+
+@app.route('/api/sessions')
+def api_sessions():
+    return jsonify(daemon.list_sessions())
+
+@app.route('/api/sequences')
+def api_sequences():
+    return jsonify(daemon.list_sequences())
+
+@app.route('/api/config', methods=['GET'])
+def api_get_cfg():
+    return jsonify(daemon.cfg)
+
+@app.route('/api/config', methods=['POST'])
+def api_set_cfg():
+    updates = request.get_json(force=True, silent=True) or {}
+    daemon.cfg.update(updates)
+    _save_cfg(daemon.cfg)
+    return jsonify({'ok': True})
+
+@app.route('/stream')
+def stream():
+    return Response(daemon.mjpeg_frames(),
+                    mimetype='multipart/x-mixed-replace; boundary=frame')
+
+
+if __name__ == '__main__':
+    print(f'[Capture] Daemon starting on port {PORT}')
+    app.run(host='0.0.0.0', port=PORT, threaded=True)

@@ -1,0 +1,11 @@
+opencv-python>=4.8.0
+mediapipe>=0.10.0
+numpy>=1.24.0
+pyyaml>=6.0
+Pillow>=10.0.0
+pyserial>=3.5
+
+# Raspberry Pi only (install manually on Pi):
+# RPi.GPIO>=0.7.1
+# adafruit-circuitpython-pca9685>=3.4.0
+# adafruit-blinka>=8.0.0

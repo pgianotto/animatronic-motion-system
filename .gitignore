@@ -1,0 +1,37 @@
+# MediaPipe models — downloaded automatically on first run
+models/
+
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+.Python
+*.egg-info/
+dist/
+build/
+.eggs/
+*.egg
+.venv/
+venv/
+env/
+
+# FPP plugin lib copies — not needed when using the symlink deploy approach
+fpp-plugins/*/lib/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Logs
+*.log
+
+# Secrets / local overrides — copy config.yaml.example to config.yaml locally
+# (keep config.yaml committed — it's the reference config, not a secret)

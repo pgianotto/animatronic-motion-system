@@ -1,0 +1,130 @@
+camera:
+  index: 0
+  width: 640
+  height: 480
+  fps: 30
+servos:
+  pan:
+    min_angle: 0.0
+    max_angle: 180.0
+    center_angle: 90.0
+    speed_limit: 4.6
+  tilt:
+    min_angle: 30.0
+    max_angle: 150.0
+    center_angle: 90.0
+    speed_limit: 3.3
+  shoulder.L:
+    min_angle: 0.0
+    max_angle: 180.0
+    center_angle: 90.0
+    speed_limit: 10
+live_tracking:
+  face_smoothing: 0.799
+  deadzone_px: 25
+  pid:
+    kp: 0.08
+    ki: 0.013312
+    kd: 0.04
+motion_capture:
+  smoothing: 1.0
+xlights:
+  step_time_ms: 50
+  channels:
+  - name: Head Pan
+    tracked_value: head_yaw
+    xlights_channel: 1
+    min_input: -60
+    max_input: 60
+  - name: Head Tilt
+    tracked_value: head_pitch
+    xlights_channel: 2
+    min_input: -30
+    max_input: 30
+  - name: Head Roll
+    tracked_value: head_roll
+    xlights_channel: 3
+    min_input: -30
+    max_input: 30
+  - name: Mouth
+    tracked_value: mouth_open
+    xlights_channel: 4
+    min_input: 0
+    max_input: 1
+  - name: Left Eye
+    tracked_value: left_eye_open
+    xlights_channel: 5
+    min_input: 0
+    max_input: 1
+  - name: Right Eye
+    tracked_value: right_eye_open
+    xlights_channel: 6
+    min_input: 0
+    max_input: 1
+  - name: Left Eyebrow
+    tracked_value: left_eyebrow_raise
+    xlights_channel: 7
+    min_input: 0
+    max_input: 1
+  - name: Right Eyebrow
+    tracked_value: right_eyebrow_raise
+    xlights_channel: 8
+    min_input: 0
+    max_input: 1
+  - name: Torso Lean LR
+    tracked_value: torso_lean_lr
+    xlights_channel: 9
+    min_input: -1
+    max_input: 1
+  - name: Torso Lean FB
+    tracked_value: torso_lean_fb
+    xlights_channel: 10
+    min_input: -1
+    max_input: 1
+  - name: Torso Tilt
+    tracked_value: torso_tilt
+    xlights_channel: 11
+    min_input: -1
+    max_input: 1
+  - name: Left Arm Raise
+    tracked_value: left_arm_raise
+    xlights_channel: 12
+    min_input: 0
+    max_input: 1
+  - name: Right Arm Raise
+    tracked_value: right_arm_raise
+    xlights_channel: 13
+    min_input: 0
+    max_input: 1
+  - name: Left Elbow Bend
+    tracked_value: left_elbow_bend
+    xlights_channel: 14
+    min_input: 0
+    max_input: 1
+  - name: Right Elbow Bend
+    tracked_value: right_elbow_bend
+    xlights_channel: 15
+    min_input: 0
+    max_input: 1
+  - name: Left Wrist Raise
+    tracked_value: left_wrist_raise
+    xlights_channel: 16
+    min_input: 0
+    max_input: 1
+  - name: Right Wrist Raise
+    tracked_value: right_wrist_raise
+    xlights_channel: 17
+    min_input: 0
+    max_input: 1
+hardware:
+  type: mock
+  pca9685_address: '0x40'
+  pca9685_frequency: 50
+  gpio_pan_pin: 17
+  gpio_tilt_pin: 27
+  serial_port: /dev/ttyUSB0
+  serial_baud: 115200
+  channel_assignments:
+    pan: 0
+    tilt: 1
+    shoulder.L: 2
