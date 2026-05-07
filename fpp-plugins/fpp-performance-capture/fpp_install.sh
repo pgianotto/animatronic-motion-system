@@ -9,7 +9,9 @@ echo "Installing Animatronic Performance Capture plugin..."
 sudo apt-get update -qq
 sudo apt-get install -y python3-pip python3-opencv v4l-utils
 
-pip3 install --quiet flask mediapipe
+sudo apt-get install -y python3-venv python3-full
+python3 -m venv "$PLUGIN_DIR/venv" --system-site-packages
+"$PLUGIN_DIR/venv/bin/pip" install --quiet flask mediapipe
 
 PARENT="$(cd "$PLUGIN_DIR/../.." && pwd)"
 mkdir -p "$LIB_DIR"
@@ -34,7 +36,7 @@ After=network.target fpp.service
 Type=simple
 User=fpp
 WorkingDirectory=PLUGIN_DIR_PLACEHOLDER
-ExecStart=/usr/bin/python3 PLUGIN_DIR_PLACEHOLDER/daemon.py
+ExecStart=PLUGIN_DIR_PLACEHOLDER/venv/bin/python3 PLUGIN_DIR_PLACEHOLDER/daemon.py
 Restart=on-failure
 RestartSec=5
 

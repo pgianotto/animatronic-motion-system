@@ -11,9 +11,11 @@ echo "Installing Animatronic Live Follow plugin..."
 sudo apt-get update -qq
 sudo apt-get install -y python3-pip python3-opencv libcap2 v4l-utils
 
-# ── Python packages ──────────────────────────────────────────────────────────
-pip3 install --quiet flask mediapipe RPi.GPIO 2>/dev/null || \
-    pip3 install --quiet flask mediapipe  # RPi.GPIO may fail on non-Pi — OK
+# ── Python virtual environment ───────────────────────────────────────────────
+sudo apt-get install -y python3-venv python3-full
+python3 -m venv "$PLUGIN_DIR/venv" --system-site-packages
+"$PLUGIN_DIR/venv/bin/pip" install --quiet flask mediapipe RPi.GPIO 2>/dev/null || \
+    "$PLUGIN_DIR/venv/bin/pip" install --quiet flask mediapipe
 
 # ── Copy shared Python core from parent project ──────────────────────────────
 # Works whether the plugin is inside the project tree or installed standalone.
@@ -43,7 +45,7 @@ After=network.target fpp.service
 Type=simple
 User=fpp
 WorkingDirectory=PLUGIN_DIR_PLACEHOLDER
-ExecStart=/usr/bin/python3 PLUGIN_DIR_PLACEHOLDER/daemon.py
+ExecStart=PLUGIN_DIR_PLACEHOLDER/venv/bin/python3 PLUGIN_DIR_PLACEHOLDER/daemon.py
 Restart=on-failure
 RestartSec=5
 
