@@ -1,0 +1,13 @@
+{
+    "name": "Animatronic Servo Calibrator",
+    "version": "1.0.0",
+    "author": "Animatronic Motion System",
+    "description": "Mixer-style servo calibration tool for PCA9685 outputs. Live-tests individual channels using FPP test mode, and saves min/max/description back to channel output config.",
+    "homeURL": "",
+    "repoURL": "",
+    "bugURL": "",
+    "minFPPVersion": "6.0",
+    "maxFPPVersion": "",
+    "packageDependencies": [],
+    "pluginDependencies": []
+}
