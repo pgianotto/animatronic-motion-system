@@ -23,10 +23,8 @@
     padding: 7px 16px; border: 2px solid; border-radius: 5px;
     font-weight: bold; font-size: 12px; letter-spacing: 1px; cursor: pointer; white-space: nowrap;
 }
-#sc-master          { background: #06d6a0; border-color: #06d6a0; color: #000; }
-#sc-master.off      { background: transparent; color: #06d6a0; }
-#sc-stoptst         { background: transparent; border-color: #e63946; color: #e63946; }
-#sc-stoptst:hover   { background: #e63946; color: #fff; }
+#sc-enable      { background: transparent; border-color: #06d6a0; color: #06d6a0; }
+#sc-enable.on   { background: #e63946; border-color: #e63946; color: #fff; }
 #sc-savebtn         { background: #4cc9f0; border-color: #4cc9f0; color: #000; }
 #sc-savemsg         { font-size: 12px; color: #06d6a0; min-width: 70px; }
 
@@ -74,7 +72,7 @@ input[type="range"].sc-v {
     cursor: ns-resize;
 }
 .sc-fader { width: 34px; height: 160px; accent-color: #4cc9f0; }
-.sc-rs    { width: 20px; height: 140px; accent-color: #f4a261; }
+.sc-rs    { width: 14px; height: 140px; accent-color: #f4a261; }
 
 .sc-fval { font-size: 9px; color: #4cc9f0; font-family: monospace; text-align: center; min-height: 13px; }
 .sc-nval {
@@ -101,8 +99,7 @@ input[type="range"].sc-v {
   <div id="sc-bar">
     <span class="sc-lbl">Output</span>
     <select id="sc-output"><option value="">Loading…</option></select>
-    <button id="sc-master"  class="sc-tbtn" onclick="scMaster()">&#9646; ALL ON</button>
-    <button id="sc-stoptst" class="sc-tbtn" onclick="scStop()">&#9646; Stop Test</button>
+    <button id="sc-enable" class="sc-tbtn" onclick="scToggleTest()">Enable Test</button>
     <button id="sc-savebtn" class="sc-tbtn" onclick="scSave()">Save Config</button>
     <span id="sc-savemsg"></span>
   </div>
@@ -114,7 +111,7 @@ input[type="range"].sc-v {
 <script>
 'use strict';
 
-const SC = { on: true, mute: {}, solo: {}, out: null, data: null, list: [], activeStrip: -1 };
+const SC = { on: false, mute: {}, solo: {}, out: null, data: null, list: [], activeStrip: -1 };
 
 /* ── FPP API ──────────────────────────────────────────────── */
 
@@ -264,7 +261,13 @@ function scStrip(px, ch, min, max, ctr, desc, absMin, absMax, unit) {
         nmx.value = rmx.value;
         scClampFader(fdr, rmn, rmx);
     });
-    // Max number input — validate, sync range slider
+    // Max number input — live sync while typing, clamp on commit
+    nmx.addEventListener('input', () => {
+        const v = +nmx.value;
+        if (Number.isFinite(v) && v >= +nmx.min && v <= +nmx.max && v >= +rmn.value) {
+            rmx.value = v; scClampFader(fdr, rmn, rmx);
+        }
+    });
     nmx.addEventListener('change', () => {
         let v = Math.max(+nmx.min, Math.min(+nmx.max, +nmx.value || 0));
         if (v < +rmn.value) v = +rmn.value;
@@ -278,7 +281,13 @@ function scStrip(px, ch, min, max, ctr, desc, absMin, absMax, unit) {
         nmn.value = rmn.value;
         scClampFader(fdr, rmn, rmx);
     });
-    // Min number input — validate, sync range slider
+    // Min number input — live sync while typing, clamp on commit
+    nmn.addEventListener('input', () => {
+        const v = +nmn.value;
+        if (Number.isFinite(v) && v >= +nmn.min && v <= +nmn.max && v <= +rmx.value) {
+            rmn.value = v; scClampFader(fdr, rmn, rmx);
+        }
+    });
     nmn.addEventListener('change', () => {
         let v = Math.max(+nmn.min, Math.min(+nmn.max, +nmn.value || 0));
         if (v > +rmx.value) v = +rmx.value;
@@ -321,11 +330,11 @@ function scClampFader(fdr, rmn, rmx) {
     if (+fdr.value > +rmx.value) fdr.value = rmx.value;
 }
 
-function scMaster() {
+function scToggleTest() {
     SC.on = !SC.on;
-    const b = document.getElementById('sc-master');
-    b.textContent = SC.on ? '■ ALL ON' : '□ ALL OFF';
-    b.classList.toggle('off', !SC.on);
+    const b = document.getElementById('sc-enable');
+    b.textContent = SC.on ? '■ Test Active' : 'Enable Test';
+    b.classList.toggle('on', SC.on);
     if (!SC.on) scStop();
 }
 
