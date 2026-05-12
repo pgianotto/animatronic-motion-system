@@ -80,6 +80,21 @@ def main():
                 set_ch(bus, addr, i, us_to_counts(ctr, freq))
             print(json.dumps({'status': 'ok', 'action': 'stop'}))
 
+        elif action == 'set_all':
+            # Args: port us port us ... (pairs)
+            args = sys.argv[2:]
+            if len(args) % 2 != 0:
+                err('set_all requires port us pairs')
+            for i in range(0, len(args), 2):
+                port = int(args[i])
+                us   = int(args[i + 1])
+                if port < 0 or port >= len(ports):
+                    continue
+                p  = ports[port]
+                us = max(p.get('min', 500), min(p.get('max', 2500), us))
+                set_ch(bus, addr, port, us_to_counts(us, freq))
+            print(json.dumps({'status': 'ok', 'action': 'set_all'}))
+
         else:
             err(f'Unknown action: {action}')
     finally:

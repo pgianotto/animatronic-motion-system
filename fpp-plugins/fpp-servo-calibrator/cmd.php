@@ -30,6 +30,19 @@ if ($action === 'set') {
     $out = shell_exec("python3 $script stop 2>&1");
     echo $out ?: json_encode(['status' => 'error', 'message' => 'Script failed']);
 
+} elseif ($action === 'set_all') {
+    $channels = $req['channels'] ?? [];
+    $args = '';
+    foreach ($channels as $ch) {
+        $port = (int)($ch['port'] ?? -1);
+        $us   = (int)($ch['us']   ?? 0);
+        if ($port < 0 || $port > 31 || $us < 0 || $us > 4000) continue;
+        $args .= " $port $us";
+    }
+    if (!$args) { echo json_encode(['status' => 'error', 'message' => 'No valid channels']); exit; }
+    $out = shell_exec("python3 $script set_all$args 2>&1");
+    echo $out ?: json_encode(['status' => 'error', 'message' => 'Script failed']);
+
 } else {
     echo json_encode(['status' => 'error', 'message' => 'Unknown action']);
 }

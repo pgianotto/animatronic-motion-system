@@ -127,7 +127,7 @@ input[type="range"].sc-v {
 const SC = { on: false, sine: false, mute: {}, solo: {}, out: null, data: null, list: [], activeStrip: -1 };
 let scSineInterval  = null;
 let scSineStartTime = null;
-const SC_SINE_PERIOD_MS = 2000;
+const SC_RAMP_PERIOD_MS = 3000;
 
 /* ── FPP API ──────────────────────────────────────────────── */
 
@@ -142,6 +142,15 @@ async function scCmd(payload) {
 async function scSendCh(port, us) {
     us = Math.max(0, Math.min(4000, Math.round(us)));
     await scCmd({ action: 'set', port: port, us: us });
+}
+
+async function scSendAll(channels) {
+    if (!channels.length) return;
+    await fetch('plugin.php?plugin=fpp-servo-calibrator&page=cmd.php', {
+        method:  'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body:    JSON.stringify({ action: 'set_all', channels })
+    }).catch(() => {});
 }
 
 async function scStop() {
@@ -409,19 +418,23 @@ function scSineStep() {
     if (!SC.sine || !SC.on) { scSineStop(); return; }
     const now = Date.now();
     if (!scSineStartTime) scSineStartTime = now;
-    const phase = 2 * Math.PI * ((now - scSineStartTime) % SC_SINE_PERIOD_MS) / SC_SINE_PERIOD_MS;
-    const unit  = SC.out?.asUsec ? 'μs' : '';
+    // Triangle wave: 0→1→0 linearly over one period
+    const t    = ((now - scSineStartTime) % SC_RAMP_PERIOD_MS) / SC_RAMP_PERIOD_MS;
+    const frac = t < 0.5 ? 2 * t : 2 * (1 - t);
+    const unit = SC.out?.asUsec ? 'μs' : '';
+    const channels = [];
     document.querySelectorAll('.sc-strip').forEach(strip => {
         const px  = +strip.dataset.port;
         if (!scCanOut(px)) return;
         const rmn = +strip.querySelector('.sc-rmin').value;
         const rmx = +strip.querySelector('.sc-rmax').value;
-        const v   = Math.round(rmn + (rmx - rmn) * (0.5 + 0.5 * Math.sin(phase)));
+        const v   = Math.round(rmn + (rmx - rmn) * frac);
         const fdr = strip.querySelector('.sc-fader');
         fdr.value = Math.max(+fdr.min, Math.min(+fdr.max, v));
         document.getElementById(`scfv${px}`).textContent = v + unit;
-        scSendCh(px, v);
+        channels.push({ port: px, us: v });
     });
+    scSendAll(channels);
 }
 
 function scSineStop() {
@@ -430,6 +443,7 @@ function scSineStop() {
     scSineStartTime = null;
     const b = document.getElementById('sc-sine');
     if (b) { b.textContent = 'Sine Wave'; b.classList.remove('on'); }
+    scStop();
 }
 
 function scToggleSine() {
@@ -437,10 +451,10 @@ function scToggleSine() {
     const b = document.getElementById('sc-sine');
     if (SC.sine) {
         if (!SC.on) scToggleTest();
-        b.textContent = '~ Sine Active';
+        b.textContent = '~ Ramp Active';
         b.classList.add('on');
         scSineStartTime = null;
-        scSineInterval  = setInterval(scSineStep, 100);
+        scSineInterval  = setInterval(scSineStep, 50);
     } else {
         scSineStop();
     }
