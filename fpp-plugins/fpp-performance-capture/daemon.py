@@ -49,6 +49,7 @@ DEFAULTS = {
     'channel_tilt':       1,
     'joint_map':          {},   # {joint_key: {port, invert, scale}}
     'pca_output_idx':     0,    # which output from co-other.json to drive
+    'live_output':        False, # drive servos in real time when True
 }
 
 # Normalization bounds (lo, hi) → t=0.0–1.0 across the joint's natural range
@@ -278,7 +279,7 @@ class CaptureDaemon:
             with self._lock:
                 vals = self._capture.update(result)
                 self._values = vals
-                cmds = self._mapper.compute(vals)
+                cmds = self._mapper.compute(vals) if self.cfg.get('live_output') else []
             if self._writer and cmds:
                 self._writer.set_channels(cmds)
             display = self._tracker.draw_overlay(frame.copy(), result)
@@ -415,6 +416,7 @@ class CaptureDaemon:
             'values':       {k: round(v, 3) for k, v in self._values.items()},
             'joint_map':    self.cfg.get('joint_map', {}),
             'ports':        self._mapper.port_info(),
+            'live_output':  self.cfg.get('live_output', False),
         }
 
     def mjpeg_frames(self):

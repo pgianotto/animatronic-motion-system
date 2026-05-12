@@ -49,6 +49,8 @@ $dur       = $status['duration_str'] ?? '00:00.0';
 .jm-val       { color:#4cc9f0; font-family:monospace; font-size:10px; width:40px; text-align:right; flex-shrink:0; }
 .jm-sel       { background:#0f3460; color:#e0e0e0; border:1px solid #4cc9f0; border-radius:4px; padding:3px 6px; font-size:11px; max-width:180px; }
 .jm-scale-in  { background:#0f3460; color:#e0e0e0; border:1px solid #555; border-radius:4px; padding:3px 6px; font-size:11px; width:58px; text-align:center; }
+.btn-live-off { background:#1a1a2e; color:#888;    border:1px solid #555; }
+.btn-live-on  { background:#06d6a0; color:#000;    border:none; animation:pulse 1.5s infinite; }
 </style>
 
 <div style="max-width:960px;">
@@ -97,7 +99,10 @@ $dur       = $status['duration_str'] ?? '00:00.0';
 <!-- Joint Mapping -->
 <div class="pc-card">
   <h3>Joint Mapping
-    <button class="pc-btn btn-save" style="float:right; padding:5px 14px; font-size:12px;" onclick="saveJointMap()">Save Mapping</button>
+    <span style="float:right; display:flex; gap:8px; align-items:center;">
+      <button id="btn-live" class="pc-btn" style="padding:5px 14px; font-size:12px;" onclick="toggleLive()">⏵ Live Output</button>
+      <button class="pc-btn btn-save"       style="padding:5px 14px; font-size:12px;" onclick="saveJointMap()">Save Mapping</button>
+    </span>
   </h3>
   <p style="color:#888; font-size:11px; margin:0 0 10px;">
     Map each tracked joint to a servo port. Uses min/max calibration from the Servo Calibrator plugin.
@@ -259,6 +264,24 @@ function updateJointBars(values) {
   });
 }
 
+function toggleLive() {
+  const btn = document.getElementById('btn-live');
+  const isOn = btn.classList.contains('btn-live-on');
+  fetch(API + '/api/config', {
+    method: 'POST', headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({live_output: !isOn})
+  }).then(r => r.json()).then(d => {
+    if (d.ok) setLiveBtn(!isOn);
+  });
+}
+
+function setLiveBtn(on) {
+  const btn = document.getElementById('btn-live');
+  if (!btn) return;
+  btn.textContent = on ? '⏹ Live On' : '⏵ Live Output';
+  btn.className   = 'pc-btn ' + (on ? 'btn-live-on' : 'btn-live-off');
+}
+
 function saveJointMap() {
   const map = {};
   JOINTS.forEach(j => {
@@ -387,6 +410,7 @@ function pollStatus() {
       buildJointTable(s.ports, s.joint_map || {});
     }
     if (JM_built) updateJointBars(s.values || {});
+    setLiveBtn(!!s.live_output);
   }).catch(() => {});
 }
 
