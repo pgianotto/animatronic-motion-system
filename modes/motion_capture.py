@@ -124,6 +124,8 @@ def _extract(r: TrackingResult) -> Dict[str, float]:
         'right_eye_open':       r.right_eye_open,
         'left_eyebrow_raise':   r.left_eyebrow_raise,
         'right_eyebrow_raise':  r.right_eyebrow_raise,
+        'face_center_x':        r.face_center_x,
+        'face_center_y':        r.face_center_y,
         # Body
         'torso_lean_lr':        r.torso_lean_lr,
         'torso_lean_fb':        r.torso_lean_fb,

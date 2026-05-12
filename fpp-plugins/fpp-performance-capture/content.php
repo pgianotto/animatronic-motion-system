@@ -39,6 +39,16 @@ $dur       = $status['duration_str'] ?? '00:00.0';
 .tv-val       { color:#4cc9f0; font-family:monospace; font-size:11px; }
 .tv-val.body  { color:#fb8500; }
 #status-msg   { color:#06d6a0; font-size:12px; margin-top:6px; min-height:18px; }
+.jm-table     { width:100%; border-collapse:collapse; font-size:12px; }
+.jm-table th  { color:#888; text-align:left; padding:4px 8px; border-bottom:1px solid #2a2a4a; font-weight:normal; font-size:11px; }
+.jm-table td  { padding:5px 8px; border-bottom:1px solid #1a1a2e; vertical-align:middle; }
+.jm-name      { font-size:11px; width:140px; }
+.jm-bar-cell  { display:flex; align-items:center; gap:8px; }
+.jm-bar-bg    { flex:1; height:8px; background:#1a1a2e; border-radius:4px; overflow:hidden; min-width:60px; max-width:100px; }
+.jm-bar       { height:100%; background:#4cc9f0; border-radius:4px; transition:width 0.1s; }
+.jm-val       { color:#4cc9f0; font-family:monospace; font-size:10px; width:40px; text-align:right; flex-shrink:0; }
+.jm-sel       { background:#0f3460; color:#e0e0e0; border:1px solid #4cc9f0; border-radius:4px; padding:3px 6px; font-size:11px; max-width:180px; }
+.jm-scale-in  { background:#0f3460; color:#e0e0e0; border:1px solid #555; border-radius:4px; padding:3px 6px; font-size:11px; width:58px; text-align:center; }
 </style>
 
 <div style="max-width:960px;">
@@ -61,7 +71,8 @@ $dur       = $status['duration_str'] ?? '00:00.0';
       <div>
         <div style="color:#4cc9f0; font-size:10px; font-weight:bold; margin-bottom:4px;">FACE</div>
         <?php foreach (['head_yaw','head_pitch','head_roll','mouth_open',
-                        'left_eye_open','right_eye_open','left_eyebrow_raise','right_eyebrow_raise'] as $k): ?>
+                        'left_eye_open','right_eye_open','left_eyebrow_raise','right_eyebrow_raise',
+                        'face_center_x','face_center_y'] as $k): ?>
         <div class="tv-row">
           <span class="tv-key"><?= str_replace('_',' ', ucfirst($k)) ?></span>
           <span class="tv-val" id="tv-<?= $k ?>"><?= number_format($status['values'][$k] ?? 0, 2) ?></span>
@@ -81,6 +92,32 @@ $dur       = $status['duration_str'] ?? '00:00.0';
       </div>
     </div>
   </div>
+</div>
+
+<!-- Joint Mapping -->
+<div class="pc-card">
+  <h3>Joint Mapping
+    <button class="pc-btn btn-save" style="float:right; padding:5px 14px; font-size:12px;" onclick="saveJointMap()">Save Mapping</button>
+  </h3>
+  <p style="color:#888; font-size:11px; margin:0 0 10px;">
+    Map each tracked joint to a servo port. Uses min/max calibration from the Servo Calibrator plugin.
+    Set port to <em>none</em> to leave a joint unmapped.
+  </p>
+  <table class="jm-table">
+    <thead>
+      <tr>
+        <th>Joint</th>
+        <th>Live Value</th>
+        <th>Port</th>
+        <th style="text-align:center;">Invert</th>
+        <th>Scale %</th>
+      </tr>
+    </thead>
+    <tbody id="jm-tbody">
+      <tr><td colspan="5" style="color:#555; font-style:italic; padding:12px 8px;">Loading ports from FPP config…</td></tr>
+    </tbody>
+  </table>
+  <div id="jm-msg" style="color:#06d6a0; font-size:12px; margin-top:6px; min-height:16px;"></div>
 </div>
 
 <!-- Record controls -->
@@ -153,6 +190,99 @@ $dur       = $status['duration_str'] ?? '00:00.0';
 
 <script>
 const API = '/fpp-capture-api';
+
+// ── Joint mapping ──────────────────────────────────────────────────────────────
+
+const JOINTS = [
+  {key:'head_yaw',           label:'Head Yaw',            lo:-45, hi:45,  group:'face'},
+  {key:'head_pitch',         label:'Head Pitch',           lo:-40, hi:40,  group:'face'},
+  {key:'head_roll',          label:'Head Roll',            lo:-30, hi:30,  group:'face'},
+  {key:'mouth_open',         label:'Mouth Open',           lo:0,   hi:1,   group:'face'},
+  {key:'left_eye_open',      label:'Left Eye Open',        lo:0,   hi:1,   group:'face'},
+  {key:'right_eye_open',     label:'Right Eye Open',       lo:0,   hi:1,   group:'face'},
+  {key:'left_eyebrow_raise', label:'Left Eyebrow Raise',   lo:0,   hi:1,   group:'face'},
+  {key:'right_eyebrow_raise',label:'Right Eyebrow Raise',  lo:0,   hi:1,   group:'face'},
+  {key:'face_center_x',      label:'Face Center X',        lo:0,   hi:1,   group:'face'},
+  {key:'face_center_y',      label:'Face Center Y',        lo:0,   hi:1,   group:'face'},
+  {key:'torso_lean_lr',      label:'Torso Lean L/R',       lo:-1,  hi:1,   group:'body'},
+  {key:'torso_lean_fb',      label:'Torso Lean F/B',       lo:-1,  hi:1,   group:'body'},
+  {key:'torso_tilt',         label:'Torso Tilt',           lo:-1,  hi:1,   group:'body'},
+  {key:'left_arm_raise',     label:'Left Arm Raise',       lo:0,   hi:1,   group:'body'},
+  {key:'right_arm_raise',    label:'Right Arm Raise',      lo:0,   hi:1,   group:'body'},
+  {key:'left_elbow_bend',    label:'Left Elbow Bend',      lo:0,   hi:1,   group:'body'},
+  {key:'right_elbow_bend',   label:'Right Elbow Bend',     lo:0,   hi:1,   group:'body'},
+  {key:'left_wrist_raise',   label:'Left Wrist Raise',     lo:0,   hi:1,   group:'body'},
+  {key:'right_wrist_raise',  label:'Right Wrist Raise',    lo:0,   hi:1,   group:'body'},
+];
+
+let JM_ports = [];
+let JM_built = false;
+
+function buildJointTable(ports, jointMap) {
+  JM_ports = ports;
+  JM_built = true;
+  const tbody = document.getElementById('jm-tbody');
+  if (!tbody) return;
+  const portOpts = '<option value="-1">— none —</option>' +
+    ports.map(p => `<option value="${p.port}">${p.port}: ${p.desc}</option>`).join('');
+  tbody.innerHTML = JOINTS.map(j => {
+    const m   = jointMap[j.key] || {};
+    const sel = m.port !== undefined ? m.port : -1;
+    const inv = m.invert ? 'checked' : '';
+    const sc  = m.scale  !== undefined ? Math.round(m.scale * 100) : 100;
+    const gc  = j.group === 'face' ? '#4cc9f0' : '#fb8500';
+    const opts = portOpts.replace(`value="${sel}"`, `value="${sel}" selected`);
+    return `<tr>
+      <td class="jm-name" style="color:${gc};">${j.label}</td>
+      <td><div class="jm-bar-cell">
+        <div class="jm-bar-bg"><div class="jm-bar" id="jm-bar-${j.key}"></div></div>
+        <span class="jm-val" id="jm-val-${j.key}">—</span>
+      </div></td>
+      <td><select class="jm-sel" id="jm-port-${j.key}">${opts}</select></td>
+      <td style="text-align:center;"><input type="checkbox" id="jm-inv-${j.key}" ${inv}></td>
+      <td><input type="number" class="jm-scale-in" id="jm-scale-${j.key}" value="${sc}" min="0" max="200" step="5"></td>
+    </tr>`;
+  }).join('');
+}
+
+function updateJointBars(values) {
+  JOINTS.forEach(j => {
+    const v = values[j.key];
+    if (v === undefined) return;
+    const valEl = document.getElementById('jm-val-' + j.key);
+    if (valEl) valEl.textContent = (v >= 0 ? '+' : '') + v.toFixed(2);
+    const bar = document.getElementById('jm-bar-' + j.key);
+    if (bar) {
+      const pct = Math.max(0, Math.min(100, (v - j.lo) / (j.hi - j.lo) * 100));
+      bar.style.width = pct.toFixed(1) + '%';
+    }
+  });
+}
+
+function saveJointMap() {
+  const map = {};
+  JOINTS.forEach(j => {
+    const portEl  = document.getElementById('jm-port-'  + j.key);
+    const invEl   = document.getElementById('jm-inv-'   + j.key);
+    const scaleEl = document.getElementById('jm-scale-' + j.key);
+    if (!portEl) return;
+    const port = parseInt(portEl.value, 10);
+    if (port < 0) return;
+    map[j.key] = {
+      port,
+      invert: invEl ? invEl.checked : false,
+      scale:  scaleEl ? parseFloat(scaleEl.value) / 100 : 1.0,
+    };
+  });
+  fetch(API + '/api/config', {
+    method: 'POST', headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({joint_map: map})
+  }).then(r => r.json()).then(d => {
+    const el = document.getElementById('jm-msg');
+    el.textContent = d.ok ? `✓ Saved ${Object.keys(map).length} joint mapping(s)` : '✗ ' + JSON.stringify(d);
+    setTimeout(() => el.textContent = '', 4000);
+  });
+}
 
 function recStart() {
   fetch(API + '/api/record/start', {method:'POST'}).then(pollStatus);
@@ -246,11 +376,17 @@ function pollStatus() {
       document.getElementById('pb-pos').textContent = '—';
     }
 
-    // Tracked values
+    // Tracked values panel
     for (const [k, v] of Object.entries(s.values || {})) {
       const el = document.getElementById('tv-' + k);
       if (el) el.textContent = (v >= 0 ? '+' : '') + v.toFixed(2);
     }
+
+    // Joint mapping card: build table on first load, update bars every tick
+    if (!JM_built && s.ports && s.ports.length > 0) {
+      buildJointTable(s.ports, s.joint_map || {});
+    }
+    if (JM_built) updateJointBars(s.values || {});
   }).catch(() => {});
 }
 

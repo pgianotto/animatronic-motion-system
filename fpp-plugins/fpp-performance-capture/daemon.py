@@ -30,7 +30,8 @@ from core.tracker import Tracker
 from modes.motion_capture import MotionCaptureMode
 from xlights.fseq_writer import export_fseq
 
-CFG_PATH  = Path('/home/fpp/media/config/animatronic_capture.json')
+CFG_PATH      = Path('/home/fpp/media/config/animatronic_capture.json')
+CO_OTHER_PATH = Path('/home/fpp/media/config/co-other.json')
 FSEQ_DIR  = Path('/home/fpp/media/sequences')
 SESS_DIR  = Path('/home/fpp/media/animations')
 PORT      = 5002
@@ -46,7 +47,134 @@ DEFAULTS = {
     'pca9685_frequency':  50,
     'channel_pan':        0,
     'channel_tilt':       1,
+    'joint_map':          {},   # {joint_key: {port, invert, scale}}
+    'pca_output_idx':     0,    # which output from co-other.json to drive
 }
+
+# Normalization bounds (lo, hi) → t=0.0–1.0 across the joint's natural range
+NORM_RANGE = {
+    'head_yaw':            (-45, 45),
+    'head_pitch':          (-40, 40),
+    'head_roll':           (-30, 30),
+    'mouth_open':          (0, 1),
+    'left_eye_open':       (0, 1),
+    'right_eye_open':      (0, 1),
+    'left_eyebrow_raise':  (0, 1),
+    'right_eyebrow_raise': (0, 1),
+    'face_center_x':       (0, 1),
+    'face_center_y':       (0, 1),
+    'torso_lean_lr':       (-1, 1),
+    'torso_lean_fb':       (-1, 1),
+    'torso_tilt':          (-1, 1),
+    'left_arm_raise':      (0, 1),
+    'right_arm_raise':     (0, 1),
+    'left_elbow_bend':     (0, 1),
+    'right_elbow_bend':    (0, 1),
+    'left_wrist_raise':    (0, 1),
+    'right_wrist_raise':   (0, 1),
+}
+
+
+def _load_co_other(out_idx: int) -> dict | None:
+    try:
+        cfg     = json.loads(CO_OTHER_PATH.read_text())
+        outputs = [o for o in cfg.get('channelOutputs', [])
+                   if o.get('ports') and o.get('enabled', 1)]
+        return outputs[out_idx] if 0 <= out_idx < len(outputs) else None
+    except Exception:
+        return None
+
+
+class JointMapper:
+    """Maps tracked joint values → servo µs using co-other.json calibration."""
+
+    def __init__(self, joint_map: dict, out_idx: int):
+        self._map = joint_map    # {joint_key: {port, invert, scale}}
+        self._out = _load_co_other(out_idx)
+
+    def reload(self, joint_map: dict, out_idx: int):
+        self._map = joint_map
+        self._out = _load_co_other(out_idx)
+
+    def compute(self, values: dict) -> list:
+        """Return list of (port_idx, us) for all mapped joints."""
+        if not self._out or not self._map:
+            return []
+        ports = self._out.get('ports', [])
+        result = []
+        for joint, mapping in self._map.items():
+            if joint not in values:
+                continue
+            port_idx = int(mapping.get('port', -1))
+            if port_idx < 0 or port_idx >= len(ports):
+                continue
+            p  = ports[port_idx]
+            mn = p.get('min',    500)
+            mx = p.get('max',   2500)
+            lo, hi = NORM_RANGE.get(joint, (0, 1))
+            t = (values[joint] - lo) / (hi - lo + 1e-9)
+            t = max(0.0, min(1.0, t))
+            scale  = float(mapping.get('scale',  1.0))
+            invert = bool(mapping.get('invert', False))
+            t2 = 0.5 + (t - 0.5) * scale
+            if invert:
+                t2 = 1.0 - t2
+            t2 = max(0.0, min(1.0, t2))
+            us = max(mn, min(mx, round(mn + t2 * (mx - mn))))
+            result.append((port_idx, us))
+        return result
+
+    def port_info(self) -> list:
+        if not self._out:
+            return []
+        return [
+            {'port': i, 'desc': p.get('description', f'Port {i}'),
+             'min': p.get('min', 500), 'max': p.get('max', 2500),
+             'center': p.get('center', 1500)}
+            for i, p in enumerate(self._out.get('ports', []))
+        ]
+
+
+class PCA9685Writer:
+    """Writes µs values directly to a PCA9685 via I2C (smbus2)."""
+
+    def __init__(self, out: dict):
+        self._bus  = None
+        self._freq = 50.0
+        self._addr = int(out.get('deviceID', 0x40))
+        dev = out.get('device', 'i2c-1')
+        bus_num = int(dev.split('-')[-1])
+        try:
+            import smbus2
+            self._bus = smbus2.SMBus(bus_num)
+            self._wake()
+            self._freq = self._actual_freq()
+        except Exception as exc:
+            print(f'[Capture] PCA9685 unavailable: {exc}')
+
+    def _wake(self):
+        m = self._bus.read_byte_data(self._addr, 0x00)
+        if m & 0x10:
+            self._bus.write_byte_data(self._addr, 0x00, m & ~0x10)
+            time.sleep(0.005)
+
+    def _actual_freq(self) -> float:
+        pre = self._bus.read_byte_data(self._addr, 0xFE)
+        return 25_000_000 / (4096 * (pre + 1))
+
+    def _us_to_counts(self, us: int) -> int:
+        return round(us * self._freq * 4096 / 1_000_000)
+
+    def set_channels(self, commands: list):
+        if not self._bus:
+            return
+        for port, us in commands:
+            counts = self._us_to_counts(us)
+            base   = 0x06 + port * 4
+            self._bus.write_byte_data(self._addr, base,     0x00)
+            self._bus.write_byte_data(self._addr, base + 1, 0x00)
+            self._bus.write_byte_data(self._addr, base + 2, counts & 0xFF)
+            self._bus.write_byte_data(self._addr, base + 3, counts >> 8)
 
 def _load_cfg() -> dict:
     if CFG_PATH.exists():
@@ -130,6 +258,9 @@ class CaptureDaemon:
         self._camera  = Camera(index=cam['index'], width=cam['width'], height=cam['height'])
         self._tracker.start(cam['width'], cam['height'])
         self._capture  = MotionCaptureMode(servos, cc)
+        self._mapper  = JointMapper(self.cfg.get('joint_map', {}),
+                                    self.cfg.get('pca_output_idx', 0))
+        self._writer  = PCA9685Writer(self._mapper._out) if self._mapper._out else None
 
     def _start_camera_thread(self):
         if not self._camera.start():
@@ -147,6 +278,9 @@ class CaptureDaemon:
             with self._lock:
                 vals = self._capture.update(result)
                 self._values = vals
+                cmds = self._mapper.compute(vals)
+            if self._writer and cmds:
+                self._writer.set_channels(cmds)
             display = self._tracker.draw_overlay(frame.copy(), result)
             if self._capture.is_recording:
                 cv2.putText(display, '● REC', (10, 58),
@@ -279,6 +413,8 @@ class CaptureDaemon:
             'pb_pos':       self._pb_pos,
             'pb_timestamp': round(pb_ts, 2),
             'values':       {k: round(v, 3) for k, v in self._values.items()},
+            'joint_map':    self.cfg.get('joint_map', {}),
+            'ports':        self._mapper.port_info(),
         }
 
     def mjpeg_frames(self):
@@ -364,6 +500,11 @@ def api_set_cfg():
     updates = request.get_json(force=True, silent=True) or {}
     daemon.cfg.update(updates)
     _save_cfg(daemon.cfg)
+    if 'joint_map' in updates or 'pca_output_idx' in updates:
+        daemon._mapper.reload(daemon.cfg.get('joint_map', {}),
+                              daemon.cfg.get('pca_output_idx', 0))
+        out = daemon._mapper._out
+        daemon._writer = PCA9685Writer(out) if out else None
     return jsonify({'ok': True})
 
 @app.route('/stream')
