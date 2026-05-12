@@ -8,6 +8,7 @@ Falls back to OpenCV Haar cascade for face if downloads fail (live tracking
 still works; motion-capture expression/body values will be zero).
 """
 
+import time
 import urllib.request
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -91,12 +92,14 @@ class Tracker:
         self._mp         = None
         self._api:       str = 'none'
         self._pose_ok:   bool = False
+        self._start_ms:  int  = 0
 
     # ------------------------------------------------------------------
     # Startup
     # ------------------------------------------------------------------
 
     def start(self, frame_width: int = 640, frame_height: int = 480):
+        self._start_ms = int(time.time() * 1000)
         if self._try_tasks_api():
             print("[Tracker] Face Tasks API ready.")
         else:
@@ -119,10 +122,10 @@ class Tracker:
                 output_face_blendshapes=True,
                 output_facial_transformation_matrixes=True,
                 num_faces=1,
-                running_mode=mp_vision.RunningMode.IMAGE,
-                min_face_detection_confidence=0.5,
-                min_face_presence_confidence=0.5,
-                min_tracking_confidence=0.5,
+                running_mode=mp_vision.RunningMode.VIDEO,
+                min_face_detection_confidence=0.4,
+                min_face_presence_confidence=0.4,
+                min_tracking_confidence=0.4,
             )
             self._face_det = mp_vision.FaceLandmarker.create_from_options(face_opts)
             self._api = 'tasks'
@@ -133,10 +136,10 @@ class Tracker:
                     base_options=mp_python.BaseOptions(model_asset_path=str(_POSE_MODEL_PATH)),
                     output_segmentation_masks=False,
                     num_poses=1,
-                    running_mode=mp_vision.RunningMode.IMAGE,
-                    min_pose_detection_confidence=0.5,
-                    min_pose_presence_confidence=0.5,
-                    min_tracking_confidence=0.5,
+                    running_mode=mp_vision.RunningMode.VIDEO,
+                    min_pose_detection_confidence=0.4,
+                    min_pose_presence_confidence=0.4,
+                    min_tracking_confidence=0.4,
                 )
                 self._pose_det = mp_vision.PoseLandmarker.create_from_options(pose_opts)
                 self._pose_ok = True
@@ -171,9 +174,10 @@ class Tracker:
 
         rgb    = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
         mp_img = self._mp.Image(image_format=self._mp.ImageFormat.SRGB, data=rgb)
+        ts_ms  = int(time.time() * 1000) - self._start_ms
 
         # ---- Face ----
-        face_det = self._face_det.detect(mp_img)
+        face_det = self._face_det.detect_for_video(mp_img, ts_ms)
         if face_det.face_landmarks:
             lms = face_det.face_landmarks[0]
             result.face_detected   = True
@@ -203,7 +207,7 @@ class Tracker:
 
         # ---- Pose / body ----
         if self._pose_ok and self._pose_det:
-            pose_det = self._pose_det.detect(mp_img)
+            pose_det = self._pose_det.detect_for_video(mp_img, ts_ms)
             if pose_det.pose_landmarks:
                 plms = pose_det.pose_landmarks[0]
                 result.body_detected  = True
