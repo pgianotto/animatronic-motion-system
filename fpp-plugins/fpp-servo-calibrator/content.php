@@ -61,7 +61,7 @@
     justify-content: center; gap: 5px; padding: 2px 0;
 }
 .sc-col { display: flex; flex-direction: column; align-items: center; gap: 2px; }
-.sc-lbl { font-size: 8px; color: #555; text-transform: uppercase; letter-spacing: .5px; }
+.sc-lbl { font-size: 8px; color: #aaa; text-transform: uppercase; letter-spacing: .5px; }
 
 /* Vertical range inputs — bottom=low, top=high */
 input[type="range"].sc-v {
@@ -76,7 +76,7 @@ input[type="range"].sc-v {
 
 .sc-fval { font-size: 9px; color: #4cc9f0; font-family: monospace; text-align: center; min-height: 13px; }
 .sc-nval {
-    width: 34px; background: #0a0a1a; color: #f4a261;
+    width: 34px; background: #0a0a1a; color: #e0e0e0;
     border: 1px solid #2a2a3e; border-radius: 3px;
     font-size: 9px; font-family: monospace;
     padding: 1px 2px; text-align: center; -moz-appearance: textfield;
@@ -154,10 +154,19 @@ async function scLoad() {
 async function scSave() {
     if (!SC.out) return;
     document.querySelectorAll('.sc-strip').forEach(strip => {
-        const p = +strip.dataset.port;
+        const p   = +strip.dataset.port;
+        const rmn = strip.querySelector('.sc-rmin');
+        const rmx = strip.querySelector('.sc-rmax');
+        const nmn = strip.querySelector('.sc-nmn');
+        const nmx = strip.querySelector('.sc-nmx');
+        // Flush any typed value that hasn't blurred yet
+        const vx = +nmx.value;
+        const vn = +nmn.value;
+        if (Number.isFinite(vx) && vx >= +nmx.min && vx <= +nmx.max) rmx.value = vx;
+        if (Number.isFinite(vn) && vn >= +nmn.min && vn <= +nmn.max) rmn.value = vn;
         if (!SC.out.ports[p]) SC.out.ports[p] = {};
-        SC.out.ports[p].min         = +strip.querySelector('.sc-rmin').value;
-        SC.out.ports[p].max         = +strip.querySelector('.sc-rmax').value;
+        SC.out.ports[p].min         = +rmn.value;
+        SC.out.ports[p].max         = +rmx.value;
         SC.out.ports[p].description =  strip.querySelector('.sc-desc').value;
     });
     const resp = await fetch('/api/channel/output/co-other', {
