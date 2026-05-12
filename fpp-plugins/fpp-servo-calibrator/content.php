@@ -86,6 +86,10 @@ input[type="range"].sc-v {
     color: #e0e0e0 !important; background: #111827 !important;
     font-size: 10px !important; font-family: monospace !important;
 }
+#sc input.sc-desc {
+    color: #e0e0e0 !important; background: #0a0a1a !important;
+    font-size: 10px !important;
+}
 .sc-nval::-webkit-inner-spin-button,
 .sc-nval::-webkit-outer-spin-button { -webkit-appearance: none; }
 .sc-nval.sc-invalid { border-color: #e63946 !important; }
