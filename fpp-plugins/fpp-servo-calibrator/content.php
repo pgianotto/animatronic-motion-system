@@ -37,7 +37,7 @@
 /* ── Single strip ────────────────────────────────────────── */
 .sc-strip {
     background: #1a1a2e; border: 1px solid #1f2a4a; border-radius: 8px;
-    padding: 8px 5px; width: 120px; min-width: 120px;
+    padding: 8px 5px; width: 150px; min-width: 150px;
     display: flex; flex-direction: column; align-items: center; gap: 5px;
     transition: border-color .15s, opacity .15s;
 }
@@ -72,17 +72,21 @@ input[type="range"].sc-v {
     cursor: ns-resize;
 }
 .sc-fader { width: 34px; height: 160px; accent-color: #4cc9f0; }
-.sc-rs    { width: 14px; height: 140px; accent-color: #f4a261; }
+.sc-rs    { width: 14px; height: 120px; accent-color: #f4a261; }
+.sc-rctr  { width: 14px; height: 120px; accent-color: #06d6a0; }
 
 .sc-fval { font-size: 9px; color: #4cc9f0; font-family: monospace; text-align: center; min-height: 13px; }
 .sc-nval {
-    width: 34px; background: #0a0a1a; color: #e0e0e0;
-    border: 1px solid #2a2a3e; border-radius: 3px;
+    width: 28px; background: #111827; color: #e0e0e0;
+    border: 1px solid #374151; border-radius: 3px;
     font-size: 9px; font-family: monospace;
     padding: 1px 2px; text-align: center; -moz-appearance: textfield;
 }
+/* Higher specificity to override FPP Bootstrap */
+#sc input.sc-nval { color: #e0e0e0; background: #111827; }
 .sc-nval::-webkit-inner-spin-button,
 .sc-nval::-webkit-outer-spin-button { -webkit-appearance: none; }
+.sc-nval.sc-invalid { border-color: #e63946; }
 
 /* ── M / S buttons ───────────────────────────────────────── */
 .sc-btns { display: flex; gap: 5px; margin-top: 2px; }
@@ -155,18 +159,24 @@ async function scSave() {
     if (!SC.out) return;
     document.querySelectorAll('.sc-strip').forEach(strip => {
         const p   = +strip.dataset.port;
-        const rmn = strip.querySelector('.sc-rmin');
-        const rmx = strip.querySelector('.sc-rmax');
-        const nmn = strip.querySelector('.sc-nmn');
-        const nmx = strip.querySelector('.sc-nmx');
-        // Flush any typed value that hasn't blurred yet
-        const vx = +nmx.value;
-        const vn = +nmn.value;
+        const rmn  = strip.querySelector('.sc-rmin');
+        const rmx  = strip.querySelector('.sc-rmax');
+        const rctr = strip.querySelector('.sc-rcenter');
+        const nmn  = strip.querySelector('.sc-nmn');
+        const nmx  = strip.querySelector('.sc-nmx');
+        const nctr = strip.querySelector('.sc-ncenter');
+        // Flush any typed values that haven't blurred yet
+        const vx  = +nmx.value, vn = +nmn.value, vc = +nctr.value;
         if (Number.isFinite(vx) && vx >= +nmx.min && vx <= +nmx.max) rmx.value = vx;
         if (Number.isFinite(vn) && vn >= +nmn.min && vn <= +nmn.max) rmn.value = vn;
+        // Enforce max ≥ min after flush
+        if (+rmx.value < +rmn.value) rmx.value = rmn.value;
+        const cMin = +rmn.value, cMax = +rmx.value;
+        if (Number.isFinite(vc) && vc >= cMin && vc <= cMax) rctr.value = vc;
         if (!SC.out.ports[p]) SC.out.ports[p] = {};
-        SC.out.ports[p].min         = +rmn.value;
-        SC.out.ports[p].max         = +rmx.value;
+        SC.out.ports[p].min         = cMin;
+        SC.out.ports[p].max         = cMax;
+        SC.out.ports[p].center      = +rctr.value;
         SC.out.ports[p].description =  strip.querySelector('.sc-desc').value;
     });
     const resp = await fetch('/api/channel/output/co-other', {
@@ -239,17 +249,26 @@ function scStrip(px, ch, min, max, ctr, desc, absMin, absMax, unit) {
           <input type="number" class="sc-nval sc-nmn" id="scmn${px}"
                  value="${min}" min="${absMin}" max="${absMax}">
         </div>
+        <div class="sc-col">
+          <span class="sc-lbl">Ctr</span>
+          <input type="range" class="sc-v sc-rctr sc-rcenter"
+                 min="${min}" max="${max}" value="${ctr}" data-px="${px}">
+          <input type="number" class="sc-nval sc-ncenter" id="scctr${px}"
+                 value="${ctr}" min="${min}" max="${max}">
+        </div>
       </div>
       <div class="sc-btns">
         <button class="sc-m" data-px="${px}" title="Mute">M</button>
         <button class="sc-s" data-px="${px}" title="Solo">S</button>
       </div>`;
 
-    const fdr = d.querySelector('.sc-fader');
-    const rmx = d.querySelector('.sc-rmax');
-    const rmn = d.querySelector('.sc-rmin');
-    const nmx = d.querySelector('.sc-nmx');
-    const nmn = d.querySelector('.sc-nmn');
+    const fdr  = d.querySelector('.sc-fader');
+    const rmx  = d.querySelector('.sc-rmax');
+    const rmn  = d.querySelector('.sc-rmin');
+    const rctr = d.querySelector('.sc-rcenter');
+    const nmx  = d.querySelector('.sc-nmx');
+    const nmn  = d.querySelector('.sc-nmn');
+    const nctr = d.querySelector('.sc-ncenter');
 
     // Fader — live send on drag
     fdr.addEventListener('input', () => {
@@ -264,44 +283,59 @@ function scStrip(px, ch, min, max, ctr, desc, absMin, absMax, unit) {
         if (scCanOut(px)) scSendCh(px, v);
     });
 
-    // Range Max slider — clamp, sync number input, reclamp fader
+    // Max slider
     rmx.addEventListener('input', () => {
-        if (+rmx.value < +rmn.value) rmx.value = rmn.value;
+        if (+rmx.value < +rmn.value) rmx.value = rmn.value;  // max ≥ min
         nmx.value = rmx.value;
         scClampFader(fdr, rmn, rmx);
+        scClampCenter(rctr, nctr, rmn, rmx);
     });
-    // Max number input — live sync while typing, clamp on commit
     nmx.addEventListener('input', () => {
         const v = +nmx.value;
         if (Number.isFinite(v) && v >= +nmx.min && v <= +nmx.max && v >= +rmn.value) {
-            rmx.value = v; scClampFader(fdr, rmn, rmx);
+            rmx.value = v; scClampFader(fdr, rmn, rmx); scClampCenter(rctr, nctr, rmn, rmx);
         }
     });
     nmx.addEventListener('change', () => {
         let v = Math.max(+nmx.min, Math.min(+nmx.max, +nmx.value || 0));
-        if (v < +rmn.value) v = +rmn.value;
+        if (v < +rmn.value) v = +rmn.value;  // max ≥ min
         nmx.value = rmx.value = v;
         scClampFader(fdr, rmn, rmx);
+        scClampCenter(rctr, nctr, rmn, rmx);
     });
 
-    // Range Min slider — clamp, sync number input, reclamp fader
+    // Min slider
     rmn.addEventListener('input', () => {
-        if (+rmn.value > +rmx.value) rmn.value = rmx.value;
+        if (+rmn.value > +rmx.value) rmn.value = rmx.value;  // min ≤ max
         nmn.value = rmn.value;
         scClampFader(fdr, rmn, rmx);
+        scClampCenter(rctr, nctr, rmn, rmx);
     });
-    // Min number input — live sync while typing, clamp on commit
     nmn.addEventListener('input', () => {
         const v = +nmn.value;
         if (Number.isFinite(v) && v >= +nmn.min && v <= +nmn.max && v <= +rmx.value) {
-            rmn.value = v; scClampFader(fdr, rmn, rmx);
+            rmn.value = v; scClampFader(fdr, rmn, rmx); scClampCenter(rctr, nctr, rmn, rmx);
         }
     });
     nmn.addEventListener('change', () => {
         let v = Math.max(+nmn.min, Math.min(+nmn.max, +nmn.value || 0));
-        if (v > +rmx.value) v = +rmx.value;
+        if (v > +rmx.value) v = +rmx.value;  // min ≤ max
         nmn.value = rmn.value = v;
         scClampFader(fdr, rmn, rmx);
+        scClampCenter(rctr, nctr, rmn, rmx);
+    });
+
+    // Center slider
+    rctr.addEventListener('input', () => {
+        nctr.value = rctr.value;
+    });
+    nctr.addEventListener('input', () => {
+        const v = +nctr.value;
+        if (Number.isFinite(v) && v >= +rmn.value && v <= +rmx.value) rctr.value = v;
+    });
+    nctr.addEventListener('change', () => {
+        let v = Math.max(+rmn.value, Math.min(+rmx.value, +nctr.value || 0));
+        nctr.value = rctr.value = v;
     });
 
     // Mute
@@ -337,6 +371,13 @@ function scClampFader(fdr, rmn, rmx) {
     fdr.max = rmx.value;
     if (+fdr.value < +rmn.value) fdr.value = rmn.value;
     if (+fdr.value > +rmx.value) fdr.value = rmx.value;
+}
+
+function scClampCenter(rctr, nctr, rmn, rmx) {
+    rctr.min = rmn.value;
+    rctr.max = rmx.value;
+    if (+rctr.value < +rmn.value) { rctr.value = rmn.value; nctr.value = rmn.value; }
+    if (+rctr.value > +rmx.value) { rctr.value = rmx.value; nctr.value = rmx.value; }
 }
 
 function scToggleTest() {
