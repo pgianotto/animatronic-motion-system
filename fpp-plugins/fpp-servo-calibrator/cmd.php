@@ -13,6 +13,7 @@ if (!$req || !isset($req['action'])) {
 
 $script = escapeshellarg(__DIR__ . '/servo_ctl.py');
 $action = $req['action'];
+$out    = (int)($req['out'] ?? 0);
 
 if ($action === 'set') {
     $port = (int)($req['port'] ?? -1);
@@ -23,12 +24,12 @@ if ($action === 'set') {
     if ($us < 0 || $us > 4000) {
         echo json_encode(['status' => 'error', 'message' => 'Invalid us']); exit;
     }
-    $out = shell_exec("python3 $script set $port $us 2>&1");
-    echo $out ?: json_encode(['status' => 'error', 'message' => 'Script failed']);
+    $result = shell_exec("python3 $script set $out $port $us 2>&1");
+    echo $result ?: json_encode(['status' => 'error', 'message' => 'Script failed']);
 
 } elseif ($action === 'stop') {
-    $out = shell_exec("python3 $script stop 2>&1");
-    echo $out ?: json_encode(['status' => 'error', 'message' => 'Script failed']);
+    $result = shell_exec("python3 $script stop $out 2>&1");
+    echo $result ?: json_encode(['status' => 'error', 'message' => 'Script failed']);
 
 } elseif ($action === 'set_all') {
     $channels = $req['channels'] ?? [];
@@ -40,8 +41,8 @@ if ($action === 'set') {
         $args .= " $port $us";
     }
     if (!$args) { echo json_encode(['status' => 'error', 'message' => 'No valid channels']); exit; }
-    $out = shell_exec("python3 $script set_all$args 2>&1");
-    echo $out ?: json_encode(['status' => 'error', 'message' => 'Script failed']);
+    $result = shell_exec("python3 $script set_all $out$args 2>&1");
+    echo $result ?: json_encode(['status' => 'error', 'message' => 'Script failed']);
 
 } else {
     echo json_encode(['status' => 'error', 'message' => 'Unknown action']);

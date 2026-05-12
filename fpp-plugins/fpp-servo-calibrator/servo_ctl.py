@@ -8,19 +8,20 @@ def err(msg):
     print(json.dumps({'status': 'error', 'message': msg}))
     sys.exit(1)
 
-def load_pca():
+def load_output(idx):
     try:
         with open(CONFIG) as f:
             cfg = json.load(f)
     except Exception as e:
         err(f'Config read: {e}')
-    for o in cfg.get('channelOutputs', []):
-        if o.get('type') == 'PCA9685' and o.get('enabled'):
-            return o
-    err('No enabled PCA9685 output')
+    outputs = [o for o in cfg.get('channelOutputs', [])
+               if o.get('ports') and o.get('enabled')]
+    if idx < 0 or idx >= len(outputs):
+        err(f'Output index {idx} out of range (have {len(outputs)})')
+    return outputs[idx]
 
-def open_bus(pca):
-    dev = pca.get('device', 'i2c-1')
+def open_bus(out):
+    dev = out.get('device', 'i2c-1')
     try:
         return smbus2.SMBus(int(dev.split('-')[-1]))
     except Exception as e:
@@ -47,24 +48,25 @@ def set_ch(bus, addr, ch, counts):
     bus.write_byte_data(addr, base+3, counts >> 8)
 
 def main():
-    if len(sys.argv) < 2:
-        err('Usage: servo_ctl.py set <port> <us> | stop')
+    if len(sys.argv) < 3:
+        err('Usage: servo_ctl.py <action> <out_idx> [args...]')
 
-    action = sys.argv[1]
-    pca    = load_pca()
-    addr   = pca.get('deviceID', 0x40)
-    ports  = pca.get('ports', [])
-    bus    = open_bus(pca)
+    action  = sys.argv[1]
+    out_idx = int(sys.argv[2])
+    out     = load_output(out_idx)
+    addr    = out.get('deviceID', 0x40)
+    ports   = out.get('ports', [])
+    bus     = open_bus(out)
 
     wake(bus, addr)
     freq = actual_freq(bus, addr)
 
     try:
         if action == 'set':
-            if len(sys.argv) < 4:
-                err('set requires <port> <us>')
-            port = int(sys.argv[2])
-            us   = int(sys.argv[3])
+            if len(sys.argv) < 5:
+                err('set requires <out_idx> <port> <us>')
+            port = int(sys.argv[3])
+            us   = int(sys.argv[4])
             if port < 0 or port >= len(ports):
                 err(f'Port {port} out of range (0-{len(ports)-1})')
             p  = ports[port]
@@ -81,8 +83,8 @@ def main():
             print(json.dumps({'status': 'ok', 'action': 'stop'}))
 
         elif action == 'set_all':
-            # Args: port us port us ... (pairs)
-            args = sys.argv[2:]
+            # Args after out_idx: port us port us ...
+            args = sys.argv[3:]
             if len(args) % 2 != 0:
                 err('set_all requires port us pairs')
             for i in range(0, len(args), 2):
