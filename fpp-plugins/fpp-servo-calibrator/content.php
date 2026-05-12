@@ -89,6 +89,17 @@ input[type="range"].sc-v {
 .sc-rs    { width: 14px; height: 160px; accent-color: #f4a261; }
 .sc-rctr  { width: 14px; height: 160px; accent-color: #06d6a0; }
 
+/* ── Capture buttons (set min/ctr/max from fader) ───────── */
+.sc-capture-wrap { display: flex; align-items: center; justify-content: center; gap: 3px; }
+.sc-cap-lbl { font-size: 8px; color: #555; text-transform: uppercase; letter-spacing: .5px; white-space: nowrap; }
+.sc-cap-btn {
+    padding: 2px 7px; border: 1px solid #374151; border-radius: 3px;
+    background: #111827; color: #9ca3af; font-size: 9px; font-weight: bold; cursor: pointer;
+    transition: background .1s, color .1s, border-color .1s;
+}
+.sc-cap-btn:hover { background: #1f2937; color: #e0e0e0; border-color: #4cc9f0; }
+.sc-cap-btn:active { background: #4cc9f0; color: #000; border-color: #4cc9f0; }
+
 /* ── Step controls ───────────────────────────────────────── */
 .sc-step-wrap { display: flex; align-items: center; justify-content: center; gap: 3px; }
 .sc-step-dn, .sc-step-up {
@@ -340,6 +351,12 @@ function scStrip(px, ch, min, max, ctr, desc, absMin, absMax, unit) {
                  value="${ctr}" min="${min}" max="${max}">
         </div>
       </div>
+      <div class="sc-capture-wrap">
+        <span class="sc-cap-lbl">Set→</span>
+        <button class="sc-cap-btn sc-cap-min" title="Set Min to current fader position">Min</button>
+        <button class="sc-cap-btn sc-cap-ctr" title="Set Center to current fader position">Ctr</button>
+        <button class="sc-cap-btn sc-cap-max" title="Set Max to current fader position">Max</button>
+      </div>
       <div class="sc-step-wrap">
         <button class="sc-step-dn" title="Step down">−</button>
         <input  type="number" class="sc-step-sz sc-nval" value="10" min="1" max="999" title="Step size">
@@ -483,6 +500,28 @@ function scStrip(px, ch, min, max, ctr, desc, absMin, absMax, unit) {
         const step = Math.max(1, Math.round(+stepSz.value) || 1);
         fdr.value  = Math.min(+fdr.max, +fdr.value + step);
         fdr.dispatchEvent(new Event('input'));
+    });
+
+    // ── Capture fader value → Min / Ctr / Max
+    d.querySelector('.sc-cap-min').addEventListener('click', () => {
+        const v = Math.min(+fdr.value, +rmx.value);
+        rmn.value = nmn.value = v;
+        scClampFader(fdr, rmn, rmx);
+        scClampCenter(rctr, nctr, rmn, rmx);
+        scMarkDirty(px);
+    });
+    d.querySelector('.sc-cap-ctr').addEventListener('click', () => {
+        const v = Math.max(+rmn.value, Math.min(+rmx.value, +fdr.value));
+        rctr.value = nctr.value = v;
+        nctr.classList.remove('sc-invalid');
+        scMarkDirty(px);
+    });
+    d.querySelector('.sc-cap-max').addEventListener('click', () => {
+        const v = Math.max(+fdr.value, +rmn.value);
+        rmx.value = nmx.value = v;
+        scClampFader(fdr, rmn, rmx);
+        scClampCenter(rctr, nctr, rmn, rmx);
+        scMarkDirty(px);
     });
 
     // ── Copy
