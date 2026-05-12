@@ -37,7 +37,7 @@
 /* ── Single strip ────────────────────────────────────────── */
 .sc-strip {
     background: #1a1a2e; border: 1px solid #1f2a4a; border-radius: 8px;
-    padding: 8px 5px; width: 150px; min-width: 150px;
+    padding: 8px 5px; width: 168px; min-width: 168px;
     display: flex; flex-direction: column; align-items: center; gap: 5px;
     transition: border-color .15s, opacity .15s;
 }
@@ -77,16 +77,18 @@ input[type="range"].sc-v {
 
 .sc-fval { font-size: 9px; color: #4cc9f0; font-family: monospace; text-align: center; min-height: 13px; }
 .sc-nval {
-    width: 28px; background: #111827; color: #e0e0e0;
+    width: 38px; background: #111827;
     border: 1px solid #374151; border-radius: 3px;
-    font-size: 9px; font-family: monospace;
-    padding: 1px 2px; text-align: center; -moz-appearance: textfield;
+    padding: 2px 3px; text-align: center; -moz-appearance: textfield;
 }
-/* Higher specificity to override FPP Bootstrap */
-#sc input.sc-nval { color: #e0e0e0; background: #111827; }
+/* Override FPP Bootstrap font and color */
+#sc input.sc-nval {
+    color: #e0e0e0 !important; background: #111827 !important;
+    font-size: 10px !important; font-family: monospace !important;
+}
 .sc-nval::-webkit-inner-spin-button,
 .sc-nval::-webkit-outer-spin-button { -webkit-appearance: none; }
-.sc-nval.sc-invalid { border-color: #e63946; }
+.sc-nval.sc-invalid { border-color: #e63946 !important; }
 
 /* ── M / S buttons ───────────────────────────────────────── */
 .sc-btns { display: flex; gap: 5px; margin-top: 2px; }
@@ -328,14 +330,18 @@ function scStrip(px, ch, min, max, ctr, desc, absMin, absMax, unit) {
     // Center slider
     rctr.addEventListener('input', () => {
         nctr.value = rctr.value;
+        nctr.classList.remove('sc-invalid');
     });
     nctr.addEventListener('input', () => {
         const v = +nctr.value;
-        if (Number.isFinite(v) && v >= +rmn.value && v <= +rmx.value) rctr.value = v;
+        const valid = Number.isFinite(v) && v >= +rmn.value && v <= +rmx.value;
+        nctr.classList.toggle('sc-invalid', !valid && nctr.value !== '');
+        if (valid) rctr.value = v;
     });
     nctr.addEventListener('change', () => {
-        let v = Math.max(+rmn.value, Math.min(+rmx.value, +nctr.value || 0));
+        let v = Math.max(+rmn.value, Math.min(+rmx.value, +nctr.value || +rmn.value));
         nctr.value = rctr.value = v;
+        nctr.classList.remove('sc-invalid');
     });
 
     // Mute
