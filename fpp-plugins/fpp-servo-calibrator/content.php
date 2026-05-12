@@ -85,9 +85,26 @@ input[type="range"].sc-v {
     background: transparent;
     cursor: ns-resize;
 }
-.sc-fader { width: 34px; height: 160px; accent-color: #4cc9f0; }
-.sc-rs    { width: 14px; height: 120px; accent-color: #f4a261; }
-.sc-rctr  { width: 14px; height: 120px; accent-color: #06d6a0; }
+.sc-fader { width: 34px; height: 220px; accent-color: #4cc9f0; }
+.sc-rs    { width: 14px; height: 160px; accent-color: #f4a261; }
+.sc-rctr  { width: 14px; height: 160px; accent-color: #06d6a0; }
+
+/* ── Step controls ───────────────────────────────────────── */
+.sc-step-wrap { display: flex; align-items: center; justify-content: center; gap: 3px; }
+.sc-step-dn, .sc-step-up {
+    width: 28px; height: 24px; border: 1px solid #374151; border-radius: 3px;
+    background: #111827; color: #9ca3af; font-size: 16px; font-weight: bold;
+    cursor: pointer; line-height: 1; padding: 0; transition: background .1s, color .1s;
+}
+.sc-step-dn:hover, .sc-step-up:hover { background: #1f2937; color: #e0e0e0; }
+.sc-step-sz { width: 36px; -moz-appearance: textfield; }
+#sc input.sc-step-sz {
+    background: #111827 !important; color: #e0e0e0 !important;
+    border: 1px solid #374151 !important; border-radius: 3px !important;
+    font-size: 10px !important; text-align: center !important; padding: 2px 3px !important;
+}
+.sc-step-sz::-webkit-inner-spin-button,
+.sc-step-sz::-webkit-outer-spin-button { -webkit-appearance: none; }
 
 .sc-fval { font-size: 9px; color: #4cc9f0; font-family: monospace; text-align: center; min-height: 13px; }
 .sc-pct  { font-size: 8px; color: #555; font-family: monospace; text-align: center; }
@@ -323,6 +340,11 @@ function scStrip(px, ch, min, max, ctr, desc, absMin, absMax, unit) {
                  value="${ctr}" min="${min}" max="${max}">
         </div>
       </div>
+      <div class="sc-step-wrap">
+        <button class="sc-step-dn" title="Step down">−</button>
+        <input  type="number" class="sc-step-sz sc-nval" value="10" min="1" max="999" title="Step size">
+        <button class="sc-step-up" title="Step up">+</button>
+      </div>
       <div class="sc-btns">
         <button class="sc-m"  data-px="${px}" title="Mute">M</button>
         <button class="sc-s"  data-px="${px}" title="Solo">S</button>
@@ -448,6 +470,19 @@ function scStrip(px, ch, min, max, ctr, desc, absMin, absMax, unit) {
     d.querySelector('.sc-f').addEventListener('click', function () {
         SC.flip[px] = !SC.flip[px];
         this.classList.toggle('on', SC.flip[px]);
+    });
+
+    // ── Step down / up
+    const stepSz = d.querySelector('.sc-step-sz');
+    d.querySelector('.sc-step-dn').addEventListener('click', () => {
+        const step = Math.max(1, Math.round(+stepSz.value) || 1);
+        fdr.value  = Math.max(+fdr.min, +fdr.value - step);
+        fdr.dispatchEvent(new Event('input'));
+    });
+    d.querySelector('.sc-step-up').addEventListener('click', () => {
+        const step = Math.max(1, Math.round(+stepSz.value) || 1);
+        fdr.value  = Math.min(+fdr.max, +fdr.value + step);
+        fdr.dispatchEvent(new Event('input'));
     });
 
     // ── Copy
