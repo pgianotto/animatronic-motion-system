@@ -23,8 +23,10 @@
     padding: 7px 16px; border: 2px solid; border-radius: 5px;
     font-weight: bold; font-size: 12px; letter-spacing: 1px; cursor: pointer; white-space: nowrap;
 }
-#sc-enable      { background: transparent; border-color: #06d6a0; color: #06d6a0; }
-#sc-enable.on   { background: #e63946; border-color: #e63946; color: #fff; }
+#sc-enable          { background: transparent; border-color: #06d6a0; color: #06d6a0; }
+#sc-enable.on       { background: #e63946; border-color: #e63946; color: #fff; }
+#sc-sine            { background: transparent; border-color: #a78bfa; color: #a78bfa; }
+#sc-sine.on         { background: #7c3aed; border-color: #7c3aed; color: #fff; }
 #sc-savebtn         { background: #4cc9f0; border-color: #4cc9f0; color: #000; }
 #sc-savemsg         { font-size: 12px; color: #06d6a0; min-width: 70px; }
 
@@ -110,6 +112,7 @@ input[type="range"].sc-v {
     <span class="sc-lbl">Output</span>
     <select id="sc-output"><option value="">Loading…</option></select>
     <button id="sc-enable" class="sc-tbtn" onclick="scToggleTest()">Enable Test</button>
+    <button id="sc-sine"   class="sc-tbtn" onclick="scToggleSine()">Sine Wave</button>
     <button id="sc-savebtn" class="sc-tbtn" onclick="scSave()">Save Config</button>
     <span id="sc-savemsg"></span>
   </div>
@@ -121,7 +124,10 @@ input[type="range"].sc-v {
 <script>
 'use strict';
 
-const SC = { on: false, mute: {}, solo: {}, out: null, data: null, list: [], activeStrip: -1 };
+const SC = { on: false, sine: false, mute: {}, solo: {}, out: null, data: null, list: [], activeStrip: -1 };
+let scSineInterval  = null;
+let scSineStartTime = null;
+const SC_SINE_PERIOD_MS = 2000;
 
 /* ── FPP API ──────────────────────────────────────────────── */
 
@@ -199,6 +205,7 @@ async function scSave() {
 /* ── Render ───────────────────────────────────────────────── */
 
 function scRender(idx) {
+    scSineStop();
     SC.out  = SC.list[idx];
     SC.mute = {};
     SC.solo = {};
@@ -395,7 +402,48 @@ function scToggleTest() {
     const b = document.getElementById('sc-enable');
     b.textContent = SC.on ? '■ Test Active' : 'Enable Test';
     b.classList.toggle('on', SC.on);
-    if (!SC.on) scStop();
+    if (!SC.on) { scSineStop(); scStop(); }
+}
+
+function scSineStep() {
+    if (!SC.sine || !SC.on) { scSineStop(); return; }
+    const now = Date.now();
+    if (!scSineStartTime) scSineStartTime = now;
+    const phase = 2 * Math.PI * ((now - scSineStartTime) % SC_SINE_PERIOD_MS) / SC_SINE_PERIOD_MS;
+    const unit  = SC.out?.asUsec ? 'μs' : '';
+    document.querySelectorAll('.sc-strip').forEach(strip => {
+        const px  = +strip.dataset.port;
+        if (!scCanOut(px)) return;
+        const rmn = +strip.querySelector('.sc-rmin').value;
+        const rmx = +strip.querySelector('.sc-rmax').value;
+        const v   = Math.round(rmn + (rmx - rmn) * (0.5 + 0.5 * Math.sin(phase)));
+        const fdr = strip.querySelector('.sc-fader');
+        fdr.value = Math.max(+fdr.min, Math.min(+fdr.max, v));
+        document.getElementById(`scfv${px}`).textContent = v + unit;
+        scSendCh(px, v);
+    });
+}
+
+function scSineStop() {
+    SC.sine = false;
+    if (scSineInterval) { clearInterval(scSineInterval); scSineInterval = null; }
+    scSineStartTime = null;
+    const b = document.getElementById('sc-sine');
+    if (b) { b.textContent = 'Sine Wave'; b.classList.remove('on'); }
+}
+
+function scToggleSine() {
+    SC.sine = !SC.sine;
+    const b = document.getElementById('sc-sine');
+    if (SC.sine) {
+        if (!SC.on) scToggleTest();
+        b.textContent = '~ Sine Active';
+        b.classList.add('on');
+        scSineStartTime = null;
+        scSineInterval  = setInterval(scSineStep, 100);
+    } else {
+        scSineStop();
+    }
 }
 
 function scEsc(s) {
