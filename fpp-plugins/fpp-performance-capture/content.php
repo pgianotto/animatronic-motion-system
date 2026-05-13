@@ -128,8 +128,8 @@ $step_time_ms = intval($cfg['step_time_ms'] ?? 50);
   </div>
 </div>
 
-<!-- ══ Row 1: Camera + Live Values ════════════════════════════════════════ -->
-<div style="display:flex; gap:16px; margin-bottom:16px;">
+<!-- ══ Row 1: Camera + Right Panel ════════════════════════════════════════ -->
+<div style="display:flex; gap:16px; margin-bottom:16px; align-items:flex-start;">
 
   <div class="pc-card" style="flex:2; min-width:0; padding:0; overflow:hidden;">
     <div class="cam-container">
@@ -146,16 +146,15 @@ $step_time_ms = intval($cfg['step_time_ms'] ?? 50);
         </span>
         <button class="pc-btn btn-rec"  id="btn-rec"  onclick="recStart()" <?= $recording ? 'style="display:none"' : '' ?>>● Record</button>
         <button class="pc-btn btn-stop" id="btn-srec" onclick="recStop()"  <?= $recording ? '' : 'style="display:none"' ?>>■ Stop</button>
-        <button id="btn-live" class="pc-btn <?= ($cfg['live_output'] ?? false) ? 'btn-live-on' : 'btn-live-off' ?>"
-                onclick="toggleLive()">
-          <?= ($cfg['live_output'] ?? false) ? '⏹ Live On' : '⏵ Live' ?>
-        </button>
       </div>
     </div>
   </div>
 
-  <div class="pc-card" style="width:260px; flex-shrink:0;">
-    <h3>Live Values</h3>
+  <!-- ── Right panel ──────────────────────────────────────────────────── -->
+  <div class="pc-card" style="width:300px; flex-shrink:0; display:flex; flex-direction:column; gap:0;">
+
+    <!-- Live Values -->
+    <div class="pc-sub-hdr" style="margin-bottom:6px;">Live Values</div>
     <div class="tv-grid">
       <div>
         <div class="tv-group" style="color:#4cc9f0;">FACE</div>
@@ -182,46 +181,82 @@ $step_time_ms = intval($cfg['step_time_ms'] ?? 50);
         <?php endforeach; ?>
       </div>
     </div>
+
+    <hr class="pc-divider">
+
+    <!-- Live Output -->
+    <div class="pc-sub-hdr" style="margin-bottom:6px;">Live Output</div>
+    <button id="btn-live" class="pc-btn <?= ($cfg['live_output'] ?? false) ? 'btn-live-on' : 'btn-live-off' ?>"
+            style="width:100%;" onclick="toggleLive()">
+      <?= ($cfg['live_output'] ?? false) ? '⏹ Live On' : '⏵ Live Output' ?>
+    </button>
+
+    <hr class="pc-divider">
+
+    <!-- Smoothing -->
+    <div class="pc-sub-hdr" style="margin-bottom:8px;">Smoothing</div>
+    <div style="margin-bottom:8px;">
+      <div style="color:#888; font-size:11px; margin-bottom:3px;">Joint</div>
+      <div style="display:flex; align-items:center; gap:8px;">
+        <input type="range" id="sl-smoothing" class="pc-slider" style="flex:1;"
+               min="0.05" max="0.9" step="0.05"
+               value="<?= number_format($cfg['smoothing'] ?? 0.15, 2) ?>"
+               oninput="document.getElementById('lbl-smoothing').textContent=parseFloat(this.value).toFixed(2)">
+        <span id="lbl-smoothing" class="pc-value" style="width:32px;"><?= number_format($cfg['smoothing'] ?? 0.15, 2) ?></span>
+      </div>
+    </div>
+    <div style="margin-bottom:10px;">
+      <div style="color:#888; font-size:11px; margin-bottom:3px;">Servo</div>
+      <div style="display:flex; align-items:center; gap:8px;">
+        <input type="range" id="sl-servo" class="pc-slider" style="flex:1;"
+               min="0.05" max="0.9" step="0.05"
+               value="<?= number_format($cfg['servo_smoothing'] ?? 0.25, 2) ?>"
+               oninput="document.getElementById('lbl-servo').textContent=parseFloat(this.value).toFixed(2)">
+        <span id="lbl-servo" class="pc-value" style="width:32px;"><?= number_format($cfg['servo_smoothing'] ?? 0.25, 2) ?></span>
+      </div>
+    </div>
+    <div style="display:flex; align-items:center; gap:8px;">
+      <button class="pc-btn btn-ghost" style="flex:1;" onclick="saveSmoothing()">Save Settings</button>
+      <span id="settings-msg" class="pc-msg" style="margin:0; font-size:11px;"></span>
+    </div>
+
+    <hr class="pc-divider">
+
+    <!-- Playback -->
+    <div class="pc-sub-hdr" style="margin-bottom:6px;">Playback</div>
+    <div style="display:flex; align-items:center; gap:8px; margin-bottom:8px;">
+      <span class="pc-badge <?= $playing ? 'badge-play' : 'badge-idle' ?>" id="badge-play">
+        <?= $playing ? ($paused ? '⏸ PAUSED' : '▶ PLAYING') : 'STOPPED' ?>
+      </span>
+      <span class="pc-value" id="pb-pos" style="font-size:11px; font-family:monospace;">—</span>
+    </div>
+    <div style="display:flex; gap:6px;">
+      <button class="pc-btn btn-play"  style="flex:1;" onclick="pbStart()">▶ Play</button>
+      <button class="pc-btn btn-pause" style="flex:1;" onclick="pbPause()">⏸ Pause</button>
+      <button class="pc-btn btn-halt"  style="flex:1;" onclick="pbStop()">■ Stop</button>
+    </div>
+
+    <hr class="pc-divider">
+
+    <!-- Session Files -->
+    <div class="pc-sub-hdr" style="margin-bottom:8px;">Session Files</div>
+    <div style="display:flex; gap:6px; margin-bottom:8px;">
+      <input class="pc-input" id="sess-save-name" value="session.json" style="flex:1; min-width:0;">
+      <button class="pc-btn btn-ghost" onclick="sessSave()">Save</button>
+    </div>
+    <div style="display:flex; gap:6px; margin-bottom:6px;">
+      <select class="pc-select" id="sess-load-sel" style="flex:1; min-width:0;">
+        <?php foreach ($sessions as $s): ?>
+          <option><?= htmlspecialchars($s) ?></option>
+        <?php endforeach; ?>
+      </select>
+      <button class="pc-btn btn-ghost" onclick="sessLoad()">Load</button>
+      <button class="pc-btn btn-muted" onclick="refreshSessions()" title="Refresh">↻</button>
+    </div>
+    <div id="status-msg" class="pc-msg" style="color:#06d6a0;"></div>
+
   </div>
 
-</div>
-
-<!-- ══ Playback ════════════════════════════════════════════════════════════ -->
-<div class="pc-card">
-  <h3>Playback</h3>
-  <div class="pc-field">
-    <span class="pc-badge <?= $playing ? 'badge-play' : 'badge-idle' ?>" id="badge-play">
-      <?= $playing ? ($paused ? '⏸ PAUSED' : '▶ PLAYING') : 'STOPPED' ?>
-    </span>
-    <span class="pc-value" id="pb-pos" style="font-size:12px;">—</span>
-  </div>
-  <div class="pc-field">
-    <button class="pc-btn btn-play"  onclick="pbStart()">▶ Play</button>
-    <button class="pc-btn btn-pause" onclick="pbPause()">⏸ Pause</button>
-    <button class="pc-btn btn-halt"  onclick="pbStop()">■ Stop</button>
-  </div>
-</div>
-
-<!-- ══ Session Files ═══════════════════════════════════════════════════════ -->
-<div class="pc-card">
-  <h3>Session Files</h3>
-  <p class="pc-hint">Save raw capture data and reload it later to re-export with different settings.</p>
-  <div class="pc-field">
-    <span class="pc-label">Save as</span>
-    <input class="pc-input" id="sess-save-name" value="session.json" style="width:200px;">
-    <button class="pc-btn btn-ghost" onclick="sessSave()">Save Session</button>
-  </div>
-  <div class="pc-field">
-    <span class="pc-label">Load</span>
-    <select class="pc-select" id="sess-load-sel" style="width:200px;">
-      <?php foreach ($sessions as $s): ?>
-        <option><?= htmlspecialchars($s) ?></option>
-      <?php endforeach; ?>
-    </select>
-    <button class="pc-btn btn-ghost" onclick="sessLoad()">Load</button>
-    <button class="pc-btn btn-muted" onclick="refreshSessions()" title="Refresh list">↻</button>
-  </div>
-  <div id="status-msg" class="pc-msg" style="color:#06d6a0;"></div>
 </div>
 
 <!-- ══ Export to FPP / xLights ════════════════════════════════════════════ -->
@@ -302,39 +337,6 @@ $step_time_ms = intval($cfg['step_time_ms'] ?? 50);
     </tbody>
   </table>
   <div id="jm-msg" class="pc-msg" style="color:#06d6a0; margin-top:6px;"></div>
-</div>
-
-<!-- ══ Tracking & Servo Settings ══════════════════════════════════════════ -->
-<div class="pc-card">
-  <h3>Tracking &amp; Servo Settings</h3>
-  <p class="pc-hint" style="margin-bottom:14px;">
-    Lower values = smoother but slower response. Higher values = faster but potentially jittery.
-    Changes take effect immediately on Save.
-  </p>
-
-  <div class="pc-field">
-    <span class="pc-label">Joint Smoothing</span>
-    <input type="range" id="sl-smoothing" class="pc-slider" min="0.05" max="0.9" step="0.05"
-           value="<?= number_format($cfg['smoothing'] ?? 0.15, 2) ?>"
-           oninput="document.getElementById('lbl-smoothing').textContent=parseFloat(this.value).toFixed(2)">
-    <span id="lbl-smoothing" class="pc-value" style="width:36px;"><?= number_format($cfg['smoothing'] ?? 0.15, 2) ?></span>
-    <span style="color:#555; font-size:11px;">smooths raw tracking values</span>
-  </div>
-
-  <div class="pc-field">
-    <span class="pc-label">Servo Smoothing</span>
-    <input type="range" id="sl-servo" class="pc-slider" min="0.05" max="0.9" step="0.05"
-           value="<?= number_format($cfg['servo_smoothing'] ?? 0.25, 2) ?>"
-           oninput="document.getElementById('lbl-servo').textContent=parseFloat(this.value).toFixed(2)">
-    <span id="lbl-servo" class="pc-value" style="width:36px;"><?= number_format($cfg['servo_smoothing'] ?? 0.25, 2) ?></span>
-    <span style="color:#555; font-size:11px;">smooths µs output to hardware</span>
-  </div>
-
-  <div class="pc-field" style="margin-top:4px;">
-    <span class="pc-label"></span>
-    <button class="pc-btn btn-ghost" onclick="saveSmoothing()">Save Settings</button>
-    <span id="settings-msg" class="pc-msg" style="margin:0;"></span>
-  </div>
 </div>
 
 </div><!-- .pc-wrap -->

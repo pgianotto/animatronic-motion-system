@@ -35,3 +35,6 @@ desktop.ini
 
 # Secrets / local overrides — copy config.yaml.example to config.yaml locally
 # (keep config.yaml committed — it's the reference config, not a secret)
+
+# Claude Code local settings (Pi IP, personal hooks)
+.claude/settings.local.json
