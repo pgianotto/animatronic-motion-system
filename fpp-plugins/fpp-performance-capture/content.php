@@ -125,6 +125,33 @@ $dur       = $status['duration_str'] ?? '00:00.0';
   <div id="jm-msg" style="color:#06d6a0; font-size:12px; margin-top:6px; min-height:16px;"></div>
 </div>
 
+<!-- Smoothing settings -->
+<div class="pc-card">
+  <h3>Tracking &amp; Servo Settings</h3>
+  <div class="pc-row" style="align-items:center; gap:16px; flex-wrap:wrap;">
+    <div style="display:flex; align-items:center; gap:10px;">
+      <span class="pc-label" style="width:auto;">Joint Smoothing</span>
+      <input type="range" id="sl-smoothing" min="0.05" max="0.9" step="0.05"
+             value="<?= number_format($cfg['smoothing'] ?? 0.15, 2) ?>"
+             oninput="document.getElementById('lbl-smoothing').textContent=parseFloat(this.value).toFixed(2)"
+             style="width:140px;">
+      <span id="lbl-smoothing" class="pc-value" style="width:36px;"><?= number_format($cfg['smoothing'] ?? 0.15, 2) ?></span>
+    </div>
+    <div style="display:flex; align-items:center; gap:10px;">
+      <span class="pc-label" style="width:auto;">Servo Smoothing</span>
+      <input type="range" id="sl-servo" min="0.05" max="0.9" step="0.05"
+             value="<?= number_format($cfg['servo_smoothing'] ?? 0.25, 2) ?>"
+             oninput="document.getElementById('lbl-servo').textContent=parseFloat(this.value).toFixed(2)"
+             style="width:140px;">
+      <span id="lbl-servo" class="pc-value" style="width:36px;"><?= number_format($cfg['servo_smoothing'] ?? 0.25, 2) ?></span>
+    </div>
+    <button class="pc-btn btn-save" style="padding:6px 16px;" onclick="saveSmoothing()">Save</button>
+  </div>
+  <p style="color:#555; font-size:10px; margin:6px 0 0;">
+    Lower = smoother but slower response. Joint: smooths raw tracking values. Servo: smooths µs output to hardware.
+  </p>
+</div>
+
 <!-- Record controls -->
 <div class="pc-card">
   <h3>Recording</h3>
@@ -267,6 +294,19 @@ function updateJointBars(values) {
       const pct = Math.max(0, Math.min(100, (v - j.lo) / (j.hi - j.lo) * 100));
       bar.style.width = pct.toFixed(1) + '%';
     }
+  });
+}
+
+function saveSmoothing() {
+  const smoothing      = parseFloat(document.getElementById('sl-smoothing').value);
+  const servo_smoothing = parseFloat(document.getElementById('sl-servo').value);
+  fetch(API + '/api/config', {
+    method: 'POST', headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({smoothing, servo_smoothing})
+  }).then(r => r.json()).then(d => {
+    const el = document.getElementById('jm-msg');
+    el.textContent = d.ok ? '✓ Smoothing saved' : '✗ ' + JSON.stringify(d);
+    setTimeout(() => el.textContent = '', 3000);
   });
 }
 
