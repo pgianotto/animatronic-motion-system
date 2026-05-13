@@ -373,7 +373,7 @@ class CaptureDaemon:
 
     # ── Export ───────────────────────────────────────────────────────────────
 
-    def export_fseq(self, filename: str) -> dict:
+    def export_fseq(self, filename: str, step_time_ms: int = None) -> dict:
         frames = self._capture.get_frames()
         if not frames:
             return {'ok': False, 'error': 'No frames recorded'}
@@ -383,7 +383,7 @@ class CaptureDaemon:
         out = self._mapper._out
         if not out:
             return {'ok': False, 'error': 'No servo output found in co-other.json'}
-        step_ms  = int(self.cfg.get('step_time_ms', 50))
+        step_ms = step_time_ms if step_time_ms is not None else int(self.cfg.get('step_time_ms', 50))
         FSEQ_DIR.mkdir(parents=True, exist_ok=True)
         out_path = FSEQ_DIR / filename
         try:
@@ -445,6 +445,7 @@ class CaptureDaemon:
             'joint_map':    self.cfg.get('joint_map', {}),
             'ports':        self._mapper.port_info(),
             'live_output':  self.cfg.get('live_output', False),
+            'cam_running':  getattr(self, '_cam_running', False),
         }
 
     def mjpeg_frames(self):
@@ -497,9 +498,12 @@ def api_pb_stop():
 def api_export():
     data     = request.get_json(force=True, silent=True) or {}
     filename = data.get('filename', 'capture.fseq')
+    step_ms  = data.get('step_time_ms')
+    if step_ms is not None:
+        step_ms = max(10, min(500, int(step_ms)))
     if not filename.endswith('.fseq'):
         filename += '.fseq'
-    return jsonify(daemon.export_fseq(filename))
+    return jsonify(daemon.export_fseq(filename, step_ms))
 
 @app.route('/api/session/save', methods=['POST'])
 def api_sess_save():
@@ -536,6 +540,14 @@ def api_set_cfg():
         out = daemon._mapper._out
         daemon._writer = PCA9685Writer(out) if out else None
     return jsonify({'ok': True})
+
+@app.route('/api/camera/retry', methods=['POST'])
+def api_cam_retry():
+    """Retry opening the camera — call after live-follow releases it."""
+    if not getattr(daemon, '_cam_running', False):
+        daemon._start_camera_thread()
+    return jsonify({'ok': True, 'cam_running': getattr(daemon, '_cam_running', False)})
+
 
 @app.route('/stream')
 def stream():

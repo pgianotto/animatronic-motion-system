@@ -348,6 +348,24 @@ def stream():
                     mimetype='multipart/x-mixed-replace; boundary=frame')
 
 
+@app.route('/api/camera/release', methods=['POST'])
+def api_cam_release():
+    """Stop the camera thread so another daemon can claim the device."""
+    daemon._cam_running = False
+    time.sleep(0.15)
+    if daemon._camera:
+        daemon._camera.stop()
+    return jsonify({'ok': True})
+
+
+@app.route('/api/camera/restore', methods=['POST'])
+def api_cam_restore():
+    """Restart the camera thread after it was released."""
+    if not daemon._cam_running:
+        daemon._start_camera_thread()
+    return jsonify({'ok': True, 'cam_running': daemon._cam_running})
+
+
 if __name__ == '__main__':
     print(f'[LiveFollow] Daemon starting on port {PORT}')
     app.run(host='0.0.0.0', port=PORT, threaded=True)
