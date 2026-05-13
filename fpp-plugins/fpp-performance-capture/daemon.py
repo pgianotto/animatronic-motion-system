@@ -28,7 +28,6 @@ from core.camera import Camera
 from core.servo_controller import ServoController, create_backend
 from core.tracker import Tracker
 from modes.motion_capture import MotionCaptureMode
-from xlights.fseq_writer import export_fseq
 
 CFG_PATH      = Path('/home/fpp/media/config/animatronic_capture.json')
 CO_OTHER_PATH = Path('/home/fpp/media/config/co-other.json')
