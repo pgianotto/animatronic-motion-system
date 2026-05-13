@@ -1,7 +1,6 @@
 <?php
 // Direct I2C servo controller — bypasses fppd, writes to PCA9685 via Python.
-header('Content-Type: application/json');
-
+// Note: no header() call here — FPP's config.php has already sent output.
 $body = file_get_contents('php://input');
 if (!$body) { echo json_encode(['status' => 'error', 'message' => 'No body']); exit; }
 

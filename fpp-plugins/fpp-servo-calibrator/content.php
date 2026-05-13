@@ -152,6 +152,15 @@ input[type="range"].sc-v {
 .sc-copy.flash   { background: #4cc9f0; color: #000; border-color: #4cc9f0; }
 .sc-paste.ready  { border-color: #4cc9f0; color: #4cc9f0; }
 .sc-paste:disabled { opacity: .3; cursor: default; }
+
+/* ── Zero behavior select ─────────────────────────────────── */
+.sc-zb-wrap { display: flex; align-items: center; justify-content: center; gap: 4px; width: 100%; }
+.sc-zb-lbl { font-size: 8px; color: #aaa; text-transform: uppercase; letter-spacing: .5px; }
+#sc select.sc-zbsel {
+    flex: 1; background: #111827; color: #e0e0e0;
+    border: 1px solid #374151; border-radius: 3px;
+    font-size: 9px; padding: 2px 3px; cursor: pointer;
+}
 </style>
 
 <div id="sc">
@@ -216,6 +225,24 @@ async function scStop() {
     SC.activeStrip = -1;
 }
 
+async function scApplyZeroBehaviors() {
+    if (!SC.out) return;
+    const channels = [];
+    document.querySelectorAll('.sc-strip').forEach(strip => {
+        const px  = +strip.dataset.port;
+        const zb  = parseInt(strip.querySelector('.sc-zbsel')?.value ?? '0', 10);
+        const mn  = +strip.querySelector('.sc-rmin').value;
+        const ctr = +strip.querySelector('.sc-rcenter').value;
+        if      (zb === 1) channels.push({ port: px, us: mn  });  // Normal → min (ch=0 position)
+        else if (zb === 2) channels.push({ port: px, us: ctr });  // To Center
+        else if (zb === 3) channels.push({ port: px, us: 0   });  // Stop PWM → no signal
+        // 0 (Hold) → keep last I2C output, no command needed
+    });
+    if (channels.length) await scSendAll(channels);
+    document.querySelectorAll('.sc-strip').forEach(s => s.classList.remove('sc-active'));
+    SC.activeStrip = -1;
+}
+
 async function scLoad() {
     const r = await fetch('/api/channel/output/co-other').catch(() => null);
     if (!r?.ok) {
@@ -255,7 +282,8 @@ async function scSave() {
         SC.out.ports[p].min         = cMin;
         SC.out.ports[p].max         = cMax;
         SC.out.ports[p].center      = +rctr.value;
-        SC.out.ports[p].description = strip.querySelector('.sc-desc').value;
+        SC.out.ports[p].description  = strip.querySelector('.sc-desc').value;
+        SC.out.ports[p].zeroBehavior = parseInt(strip.querySelector('.sc-zbsel').value, 10);
     });
     const resp = await fetch('/api/channel/output/co-other', {
         method:  'POST',
@@ -301,11 +329,12 @@ function scRender(idx) {
         SC.mute[x] = false;
         SC.solo[x] = false;
         SC.flip[x] = false;
-        cont.appendChild(scStrip(x, ch, min, max, ctr, p.description ?? '', absMin, absMax, unit));
+        const zb = Number.isInteger(p.zeroBehavior) ? p.zeroBehavior : 0;
+        cont.appendChild(scStrip(x, ch, min, max, ctr, p.description ?? '', zb, absMin, absMax, unit));
     });
 }
 
-function scStrip(px, ch, min, max, ctr, desc, absMin, absMax, unit) {
+function scStrip(px, ch, min, max, ctr, desc, zeroBehavior, absMin, absMax, unit) {
     const d = document.createElement('div');
     d.className    = 'sc-strip';
     d.id           = `scs${px}`;
@@ -356,6 +385,15 @@ function scStrip(px, ch, min, max, ctr, desc, absMin, absMax, unit) {
         <button class="sc-cap-btn sc-cap-min" title="Set Min to current fader position">Min</button>
         <button class="sc-cap-btn sc-cap-ctr" title="Set Center to current fader position">Ctr</button>
         <button class="sc-cap-btn sc-cap-max" title="Set Max to current fader position">Max</button>
+      </div>
+      <div class="sc-zb-wrap">
+        <span class="sc-zb-lbl">Zero</span>
+        <select class="sc-zbsel" title="Behavior when test mode is disabled">
+          <option value="0"${zeroBehavior === 0 ? ' selected' : ''}>Hold</option>
+          <option value="1"${zeroBehavior === 1 ? ' selected' : ''}>Normal</option>
+          <option value="2"${zeroBehavior === 2 ? ' selected' : ''}>To Center</option>
+          <option value="3"${zeroBehavior === 3 ? ' selected' : ''}>Stop PWM</option>
+        </select>
       </div>
       <div class="sc-step-wrap">
         <button class="sc-step-dn" title="Step down">−</button>
@@ -467,6 +505,9 @@ function scStrip(px, ch, min, max, ctr, desc, absMin, absMax, unit) {
 
     // ── Description
     d.querySelector('.sc-desc').addEventListener('input', () => scMarkDirty(px));
+
+    // ── Zero behavior
+    d.querySelector('.sc-zbsel').addEventListener('change', () => scMarkDirty(px));
 
     // ── Mute
     d.querySelector('.sc-m').addEventListener('click', function () {
@@ -606,7 +647,7 @@ function scToggleTest() {
     const b = document.getElementById('sc-enable');
     b.textContent = SC.on ? '■ Test Active' : 'Enable Test';
     b.classList.toggle('on', SC.on);
-    if (!SC.on) { scRampStop(); scStop(); }
+    if (!SC.on) { scRampStop(); scApplyZeroBehaviors(); }
 }
 
 async function scCenterAll() {
@@ -661,7 +702,6 @@ function scRampStop() {
     scRampStartTime = null;
     const b = document.getElementById('sc-ramp');
     if (b) { b.textContent = 'Ramp Test'; b.classList.remove('on'); }
-    if (SC.out) scCmd({ action: 'stop' });
 }
 
 function scToggleRamp() {
