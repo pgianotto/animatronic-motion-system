@@ -179,15 +179,21 @@ $dur       = $status['duration_str'] ?? '00:00.0';
 
 <!-- Export to FPP sequences -->
 <div class="pc-card">
-  <h3>Export to FPP Sequences</h3>
+  <h3>Export to FPP / xLights</h3>
   <div class="pc-row">
     <span class="pc-label">Filename</span>
     <input class="pc-input" id="fseq-name" value="capture.fseq" style="width:220px;">
-    <button class="pc-btn btn-export" onclick="exportFseq()">Export FSEQ → FPP</button>
+    <button class="pc-btn btn-export" onclick="exportFseq()">Export FSEQ</button>
   </div>
-  <div id="export-msg" style="color:#888; font-size:12px; margin-top:4px;"></div>
+  <div id="export-msg" style="font-size:12px; margin-top:4px;"></div>
+  <div id="export-xlights" style="display:none; margin-top:10px; padding:10px; background:#0a0a1a; border-radius:6px; font-size:11px; color:#888;">
+    <div style="color:#4cc9f0; font-weight:bold; margin-bottom:6px;">xLights Import Info</div>
+    <div id="export-ch-map"></div>
+    <div style="margin-top:6px;">In xLights: add a <strong>Servo</strong> model, set channels to the pair shown above, type = 16-bit µs.</div>
+  </div>
   <p style="color:#888; font-size:11px; margin:8px 0 0;">
-    Files are saved to <code>/home/fpp/media/sequences/</code> and appear in FPP's scheduler immediately.
+    Saved to <code>/home/fpp/media/sequences/</code> — appears in FPP's scheduler immediately.
+    Servo values are written as 2-byte (16-bit µs) pairs at the FPP channel offsets from co-other.json.
   </p>
 </div>
 
@@ -356,16 +362,40 @@ function refreshSessions() {
 
 function exportFseq() {
   const name = document.getElementById('fseq-name').value.trim() || 'capture.fseq';
-  document.getElementById('export-msg').textContent = 'Exporting...';
+  const msg  = document.getElementById('export-msg');
+  msg.style.color = '#888';
+  msg.textContent = 'Exporting…';
   fetch(API + '/api/export', {
-    method:'POST', headers:{'Content-Type':'application/json'},
+    method: 'POST', headers: {'Content-Type': 'application/json'},
     body: JSON.stringify({filename: name})
-  }).then(r=>r.json()).then(d => {
+  }).then(r => r.json()).then(d => {
     if (d.ok) {
-      document.getElementById('export-msg').textContent =
-        `✓ Exported ${d.frames} frames, ${d.channels} channels, ${d.duration}s → ${d.path}`;
+      msg.style.color = '#06d6a0';
+      msg.textContent = `✓ ${d.frames} frames · ${d.duration}s · ${d.channels} channels → ${d.path}`;
+      // Show xLights channel mapping
+      const xl  = document.getElementById('export-xlights');
+      const map = document.getElementById('export-ch-map');
+      if (d.start_channel !== undefined && JM_ports.length > 0) {
+        const rows = JM_ports
+          .filter(p => {
+            const m = Object.values(
+              Object.fromEntries(Object.entries(window._lastJointMap||{}).filter(([k,v])=>v.port===p.port))
+            );
+            return true; // show all ports
+          })
+          .map(p => {
+            const ch1 = d.start_channel + p.port * 2;
+            const ch2 = ch1 + 1;
+            const label = p.desc || `Port ${p.port}`;
+            return `<div style="padding:2px 0;">Port ${p.port} <span style="color:#e0e0e0;">${label}</span> → xLights ch <strong style="color:#4cc9f0;">${ch1}</strong>–<strong style="color:#4cc9f0;">${ch2}</strong></div>`;
+          }).join('');
+        map.innerHTML = rows;
+        xl.style.display = 'block';
+      }
     } else {
-      document.getElementById('export-msg').textContent = '✗ ' + d.error;
+      msg.style.color = '#e63946';
+      msg.textContent = '✗ ' + d.error;
+      document.getElementById('export-xlights').style.display = 'none';
     }
   });
 }

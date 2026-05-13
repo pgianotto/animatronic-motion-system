@@ -1,9 +1,11 @@
-"""FSEQ v2.0 writer for xLights.
+"""FSEQ v2.0 writer for xLights / FPP.
 
 Generates uncompressed FSEQ files from recorded motion capture frames.
-Each tracked value is mapped to one DMX channel (0-255).
-xLights reads the file via File > Import > Import Effects or directly
-as a sequence by opening the .fseq in the Sequence Settings.
+Servo positions are written as 2-byte little-endian µs values at the FPP
+channel offsets defined in co-other.json (startChannel + port * 2).
+
+xLights can import the file and map each 2-channel pair to a Servo model
+using the FPP channel numbers reported after export.
 
 Format reference: https://github.com/FalconChristmas/fpp/blob/master/docs/FSEQ_Sequence_File_Format.txt
 """
@@ -16,76 +18,115 @@ import numpy as np
 
 from modes.motion_capture import CaptureFrame
 
+# Normalization bounds (lo, hi) for each tracked joint — mirrors daemon.py NORM_RANGE
+NORM_RANGE = {
+    'head_yaw':            (-45, 45),
+    'head_pitch':          (-40, 40),
+    'head_roll':           (-30, 30),
+    'mouth_open':          (0, 1),
+    'left_eye_open':       (0, 1),
+    'right_eye_open':      (0, 1),
+    'left_eyebrow_raise':  (0, 1),
+    'right_eyebrow_raise': (0, 1),
+    'face_center_x':       (0, 1),
+    'face_center_y':       (0, 1),
+    'torso_lean_lr':       (-1, 1),
+    'torso_lean_fb':       (-1, 1),
+    'torso_tilt':          (-1, 1),
+    'left_arm_raise':      (0, 1),
+    'right_arm_raise':     (0, 1),
+    'left_elbow_bend':     (0, 1),
+    'right_elbow_bend':    (0, 1),
+    'left_wrist_raise':    (0, 1),
+    'right_wrist_raise':   (0, 1),
+}
 
-def export_fseq(
+
+def export_fseq_servo(
     frames: List[CaptureFrame],
-    channel_map: List[dict],
+    joint_map: dict,
+    co_other_out: dict,
     step_time_ms: int = 50,
     output_path: str = "sequence.fseq",
 ) -> tuple:
-    """Write *frames* to an FSEQ v2 file and return (frame_count, channel_count).
+    """Write servo FSEQ compatible with FPP and xLights.
 
-    Args:
-        frames:        List of CaptureFrame objects from MotionCaptureMode.
-        channel_map:   List of channel dicts from config.yaml xlights.channels.
-        step_time_ms:  Milliseconds per frame (50 = 20fps, 25 = 40fps).
-        output_path:   Destination file path.
+    Channel layout: 2 bytes per servo port (16-bit little-endian µs value),
+    starting at co_other_out['startChannel'] (1-indexed, converted internally).
+
+    Unmapped ports are filled with their calibrated center value.
 
     Returns:
-        (num_frames, channel_count) written.
+        (num_frames, channel_count, start_channel_1indexed)
     """
     if not frames:
         raise ValueError("No frames to export — record a performance first.")
 
-    # Highest 1-based channel number used
-    channel_count = max(ch.get('xlights_channel', 1) for ch in channel_map)
+    ports    = co_other_out.get('ports', [])
+    if not ports:
+        raise ValueError("No servo ports found in output config.")
 
-    total_ms = frames[-1].timestamp * 1000.0
+    start_ch  = int(co_other_out.get('startChannel', 1)) - 1   # 0-indexed in FSEQ
+    n_ports   = len(ports)
+    ch_count  = start_ch + n_ports * 2
+
+    total_ms   = frames[-1].timestamp * 1000.0
     num_frames = max(1, int(total_ms / step_time_ms))
-
-    frame_data = np.zeros((num_frames, channel_count), dtype=np.uint8)
-
     timestamps = [f.timestamp for f in frames]
 
-    for ch in channel_map:
-        tracked    = ch.get('tracked_value', '')
-        ch_idx     = ch.get('xlights_channel', 1) - 1   # convert to 0-based
-        min_in     = float(ch.get('min_input', -90))
-        max_in     = float(ch.get('max_input',  90))
-        raw_values = [f.values.get(tracked, (min_in + max_in) / 2.0) for f in frames]
+    frame_data = np.zeros((num_frames, ch_count), dtype=np.uint8)
+
+    # Pre-fill every port at its center value
+    for pi, p in enumerate(ports):
+        mn  = p.get('min',    500)
+        mx  = p.get('max',   2500)
+        ctr = max(mn, min(mx, p.get('center', (mn + mx) // 2)))
+        ch  = start_ch + pi * 2
+        frame_data[:, ch]     = ctr & 0xFF
+        frame_data[:, ch + 1] = (ctr >> 8) & 0xFF
+
+    # Overlay each mapped joint
+    for joint_key, mapping in joint_map.items():
+        port_idx = int(mapping.get('port', -1))
+        if port_idx < 0 or port_idx >= n_ports:
+            continue
+        p      = ports[port_idx]
+        mn     = p.get('min',    500)
+        mx     = p.get('max',   2500)
+        lo, hi = NORM_RANGE.get(joint_key, (0, 1))
+        scale  = float(mapping.get('scale',  1.0))
+        invert = bool(mapping.get('invert', False))
+        raw    = [f.values.get(joint_key, (lo + hi) / 2) for f in frames]
+        ch     = start_ch + port_idx * 2
 
         for i in range(num_frames):
-            t = i * step_time_ms / 1000.0
-            frame_data[i, ch_idx] = _lerp_to_dmx(t, timestamps, raw_values, min_in, max_in)
+            t      = i * step_time_ms / 1000.0
+            v      = _interp(t, timestamps, raw)
+            t_norm = max(0.0, min(1.0, (v - lo) / (hi - lo + 1e-9)))
+            t2     = 0.5 + (t_norm - 0.5) * scale
+            if invert:
+                t2 = 1.0 - t2
+            t2 = max(0.0, min(1.0, t2))
+            us = max(mn, min(mx, round(mn + t2 * (mx - mn))))
+            frame_data[i, ch]     = us & 0xFF
+            frame_data[i, ch + 1] = (us >> 8) & 0xFF
 
-    _write_v2(output_path, frame_data, channel_count, num_frames, step_time_ms)
-    return num_frames, channel_count
+    _write_v2(output_path, frame_data, ch_count, num_frames, step_time_ms)
+    return num_frames, ch_count, int(co_other_out.get('startChannel', 1))
 
 
-# ---------------------------------------------------------------------------
-# Internal helpers
-# ---------------------------------------------------------------------------
-
-def _lerp_to_dmx(t: float, timestamps: List[float], values: List[float],
-                 min_in: float, max_in: float) -> int:
-    """Linear interpolate *values* at time *t*, then map range to 0-255."""
+def _interp(t: float, timestamps: List[float], values: List[float]) -> float:
+    """Linear interpolate values at time t."""
     if t <= timestamps[0]:
-        v = values[0]
-    elif t >= timestamps[-1]:
-        v = values[-1]
-    else:
-        # Binary search would be faster for large recordings; linear is fine here
-        for i in range(len(timestamps) - 1):
-            if timestamps[i] <= t <= timestamps[i + 1]:
-                span = timestamps[i + 1] - timestamps[i]
-                alpha = (t - timestamps[i]) / (span + 1e-9)
-                v = values[i] + alpha * (values[i + 1] - values[i])
-                break
-        else:
-            v = values[-1]
-
-    normalized = (v - min_in) / (max_in - min_in + 1e-9)
-    return int(np.clip(normalized * 255.0, 0, 255))
+        return values[0]
+    if t >= timestamps[-1]:
+        return values[-1]
+    for i in range(len(timestamps) - 1):
+        if timestamps[i] <= t <= timestamps[i + 1]:
+            span  = timestamps[i + 1] - timestamps[i]
+            alpha = (t - timestamps[i]) / (span + 1e-9)
+            return values[i] + alpha * (values[i + 1] - values[i])
+    return values[-1]
 
 
 def _write_v2(path: str, frame_data: np.ndarray, channel_count: int,

@@ -128,10 +128,12 @@ class JointMapper:
     def port_info(self) -> list:
         if not self._out:
             return []
+        start_ch = int(self._out.get('startChannel', 1))
         return [
             {'port': i, 'desc': p.get('description', f'Port {i}'),
              'min': p.get('min', 500), 'max': p.get('max', 2500),
-             'center': p.get('center', 1500)}
+             'center': p.get('center', 1500),
+             'fpp_channel': start_ch + i * 2}
             for i, p in enumerate(self._out.get('ports', []))
         ]
 
@@ -279,8 +281,8 @@ class CaptureDaemon:
             with self._lock:
                 vals = self._capture.update(result)
                 self._values = vals
-                cmds = self._mapper.compute(vals) if self.cfg.get('live_output') else []
-            if self._writer and cmds:
+                cmds = self._mapper.compute(vals)
+            if self._writer and cmds and self.cfg.get('live_output'):
                 self._writer.set_channels(cmds)
             display = self._tracker.draw_overlay(frame.copy(), result)
             if self._capture.is_recording:
@@ -348,24 +350,35 @@ class CaptureDaemon:
                 break
             self._capture.play_frame(frame.values)
             self._pb_pos = i
+            cmds = self._mapper.compute(frame.values)
+            if self._writer and cmds:
+                self._writer.set_channels(cmds)
         self._pb_playing = False
         self._pb_stop.clear()
 
     # ── Export ───────────────────────────────────────────────────────────────
 
     def export_fseq(self, filename: str) -> dict:
-        frames   = self._capture.get_frames()
+        frames = self._capture.get_frames()
         if not frames:
             return {'ok': False, 'error': 'No frames recorded'}
-        ch_map   = self.cfg.get('channels', [])
+        joint_map = self.cfg.get('joint_map', {})
+        if not joint_map:
+            return {'ok': False, 'error': 'No joint mapping configured — map joints to ports first'}
+        out = self._mapper._out
+        if not out:
+            return {'ok': False, 'error': 'No servo output found in co-other.json'}
         step_ms  = int(self.cfg.get('step_time_ms', 50))
         FSEQ_DIR.mkdir(parents=True, exist_ok=True)
         out_path = FSEQ_DIR / filename
         try:
-            nf, nch = export_fseq(frames, ch_map, step_ms, str(out_path))
+            from xlights.fseq_writer import export_fseq_servo
+            nf, nch, start_ch = export_fseq_servo(
+                frames, joint_map, out, step_ms, str(out_path))
             return {'ok': True, 'frames': nf, 'channels': nch,
                     'duration': round(nf * step_ms / 1000, 2),
-                    'path': str(out_path)}
+                    'path': str(out_path),
+                    'start_channel': start_ch}
         except Exception as exc:
             return {'ok': False, 'error': str(exc)}
 
