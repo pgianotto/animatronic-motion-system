@@ -36,7 +36,8 @@ SESS_DIR  = Path('/home/fpp/media/animations')
 PORT      = 5002
 
 DEFAULTS = {
-    'smoothing':          0.4,
+    'smoothing':          0.15,  # joint value smoothing (lower = smoother/slower)
+    'servo_smoothing':    0.25,  # servo µs output smoothing (lower = smoother/slower)
     'step_time_ms':       50,
     'camera_index':       0,
     'camera_width':       640,
@@ -237,6 +238,7 @@ class CaptureDaemon:
         self._latest_jpg  = b''
         self._values      = {}
 
+        self._servo_pos:  dict = {}
         self._pb_thread: threading.Thread = None
         self._pb_stop    = threading.Event()
         self._pb_pause   = threading.Event()
@@ -245,6 +247,16 @@ class CaptureDaemon:
 
         self._start_components()
         self._start_camera_thread()
+
+    def _smooth_servos(self, cmds: list) -> list:
+        alpha = float(self.cfg.get('servo_smoothing', 0.25))
+        out = []
+        for port, us in cmds:
+            prev = self._servo_pos.get(port, us)
+            smoothed = prev + alpha * (us - prev)
+            self._servo_pos[port] = smoothed
+            out.append((port, round(smoothed)))
+        return out
 
     def _start_components(self):
         cc = _build_core_config(self.cfg)
@@ -281,8 +293,10 @@ class CaptureDaemon:
                 vals = self._capture.update(result)
                 self._values = vals
                 cmds = self._mapper.compute(vals)
-            if self._writer and cmds and self.cfg.get('live_output'):
-                self._writer.set_channels(cmds)
+            if cmds and self.cfg.get('live_output'):
+                cmds = self._smooth_servos(cmds)
+                if self._writer:
+                    self._writer.set_channels(cmds)
             display = self._tracker.draw_overlay(frame.copy(), result)
             if self._capture.is_recording:
                 cv2.putText(display, '● REC', (10, 58),
@@ -350,8 +364,10 @@ class CaptureDaemon:
             self._capture.play_frame(frame.values)
             self._pb_pos = i
             cmds = self._mapper.compute(frame.values)
-            if self._writer and cmds:
-                self._writer.set_channels(cmds)
+            if cmds:
+                cmds = self._smooth_servos(cmds)
+                if self._writer:
+                    self._writer.set_channels(cmds)
         self._pb_playing = False
         self._pb_stop.clear()
 
