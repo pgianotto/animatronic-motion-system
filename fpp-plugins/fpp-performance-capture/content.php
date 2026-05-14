@@ -669,7 +669,9 @@ function claimCamera() {
   const msg = document.getElementById('cam-claim-msg');
   msg.style.color = '#888';
   msg.textContent = 'Releasing from Live Follow…';
+  // Swallow live-follow errors — if it's not running the camera is already free
   fetch('/fpp-live-follow-api/api/camera/release', {method: 'POST'})
+    .catch(() => null)
     .then(() => {
       msg.textContent = 'Opening camera…';
       return fetch(API + '/api/camera/retry', {method: 'POST'});
@@ -687,7 +689,7 @@ function claimCamera() {
     })
     .catch(() => {
       msg.style.color = '#e63946';
-      msg.textContent = '✗ Could not reach Live Follow daemon';
+      msg.textContent = '✗ Could not reach Performance Capture daemon';
     });
 }
 
