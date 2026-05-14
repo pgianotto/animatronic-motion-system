@@ -193,6 +193,7 @@ const SC = {
 };
 let scRampInterval  = null;
 let scRampStartTime = null;
+let scRampInFlight  = false;
 
 /* ── FPP API ──────────────────────────────────────────────── */
 
@@ -669,8 +670,10 @@ async function scCenterAll() {
 
 /* ── Ramp test ────────────────────────────────────────────── */
 
-function scRampStep() {
+async function scRampStep() {
     if (!SC.ramp || !SC.on) { scRampStop(); return; }
+    if (scRampInFlight) return;
+    scRampInFlight = true;
     const now    = Date.now();
     if (!scRampStartTime) scRampStartTime = now;
     const period = +document.getElementById('sc-period').value;
@@ -693,13 +696,18 @@ function scRampStep() {
         document.getElementById(`scpct${px}`).textContent = pct + '%';
         channels.push({ port: px, us: outV });
     });
-    scSendAll(channels);
+    try {
+        if (channels.length) await scSendAll(channels);
+    } finally {
+        scRampInFlight = false;
+    }
 }
 
 function scRampStop() {
     SC.ramp = false;
     if (scRampInterval) { clearInterval(scRampInterval); scRampInterval = null; }
     scRampStartTime = null;
+    scRampInFlight  = false;
     const b = document.getElementById('sc-ramp');
     if (b) { b.textContent = 'Ramp Test'; b.classList.remove('on'); }
 }
