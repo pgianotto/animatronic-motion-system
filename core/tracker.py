@@ -67,6 +67,8 @@ class TrackingResult:
 
     # --- Body (normalised 0–1 in frame unless noted as degrees) ---
     body_detected:        bool  = False
+    body_center_x:        float = 0.5    # nose landmark position, normalised
+    body_center_y:        float = 0.5
     # Torso
     torso_lean_lr:        float = 0.0    # shoulder midpoint X offset from hip midpoint (-1→+1)
     torso_lean_fb:        float = 0.0    # shoulder Z vs hip Z (forward/back lean, -1→+1)
@@ -212,6 +214,8 @@ class Tracker:
                 plms = pose_det.pose_landmarks[0]
                 result.body_detected  = True
                 result.pose_landmarks = plms
+                result.body_center_x  = float(plms[_NOSE].x)
+                result.body_center_y  = float(plms[_NOSE].y)
                 _fill_body(result, plms)
 
         return result

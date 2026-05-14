@@ -37,15 +37,37 @@ class LiveTrackingMode:
         self._servos.center_all()
 
     def update(self, result: TrackingResult):
-        if not self.active or not result.face_detected:
+        if not self.active:
             self._has_face = False
             return
+
+        lt_cfg       = self._cfg.get('live_tracking', {})
+        track_mode   = lt_cfg.get('tracking_mode', 'face')
+
+        # Resolve subject position based on tracking mode
+        if track_mode == 'face':
+            if not result.face_detected:
+                self._has_face = False
+                return
+            fx, fy = result.face_center_x, result.face_center_y
+        elif track_mode == 'body':
+            if not result.body_detected:
+                self._has_face = False
+                return
+            fx, fy = result.body_center_x, result.body_center_y
+        else:  # face_or_body — face takes priority
+            if result.face_detected:
+                fx, fy = result.face_center_x, result.face_center_y
+            elif result.body_detected:
+                fx, fy = result.body_center_x, result.body_center_y
+            else:
+                self._has_face = False
+                return
 
         now = time.monotonic()
         dt  = min(now - self._last_t, 0.15) if self._last_t else 0.033
         self._last_t = now
 
-        lt_cfg     = self._cfg.get('live_tracking', {})
         servo_cfgs = self._cfg.get('servos', {})
         cam_w      = self._cfg.get('camera', {}).get('width', 640)
 
@@ -58,8 +80,6 @@ class LiveTrackingMode:
         tilt_speed = tilt_cfg.get('speed_limit',  90)   # degrees/sec
 
         # Apply per-axis invert before smoothing
-        fx = result.face_center_x
-        fy = result.face_center_y
         if pan_cfg.get('invert', False):
             fx = 1.0 - fx
         if tilt_cfg.get('invert', False):
