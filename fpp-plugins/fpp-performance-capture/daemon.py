@@ -541,6 +541,16 @@ def api_set_cfg():
         daemon._writer = PCA9685Writer(out) if out else None
     return jsonify({'ok': True})
 
+@app.route('/api/camera/release', methods=['POST'])
+def api_cam_release():
+    """Stop the camera thread so another daemon can claim the device."""
+    daemon._cam_running = False
+    time.sleep(0.15)
+    if daemon._camera:
+        daemon._camera.stop()
+    return jsonify({'ok': True})
+
+
 @app.route('/api/camera/retry', methods=['POST'])
 def api_cam_retry():
     """Retry opening the camera — call after live-follow releases it."""
