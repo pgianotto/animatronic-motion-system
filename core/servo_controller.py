@@ -50,8 +50,38 @@ class SerialServoBackend(ServoBackend):
         self._ser.close()
 
 
+class Smbus2ServoBackend(ServoBackend):
+    """PCA9685 via smbus2 — no Adafruit libs required.
+
+    Reads the actual PWM frequency from the prescaler register so pulse
+    widths are accurate regardless of what fppd has configured.
+    """
+    def __init__(self, address: int = 0x40, i2c_bus: int = 1):
+        import smbus2
+        self._bus  = smbus2.SMBus(i2c_bus)
+        self._addr = address
+        m = self._bus.read_byte_data(address, 0x00)
+        if m & 0x10:
+            self._bus.write_byte_data(address, 0x00, m & ~0x10)
+            time.sleep(0.005)
+        pre = self._bus.read_byte_data(address, 0xFE)
+        self._freq = 25_000_000 / (4096 * (pre + 1))
+
+    def set_angle(self, channel: int, angle: float):
+        pulse_us = 1000.0 + (float(angle) / 180.0) * 1000.0
+        counts   = round(pulse_us * self._freq * 4096 / 1_000_000)
+        base = 0x06 + channel * 4
+        self._bus.write_byte_data(self._addr, base,   0)
+        self._bus.write_byte_data(self._addr, base+1, 0)
+        self._bus.write_byte_data(self._addr, base+2, counts & 0xFF)
+        self._bus.write_byte_data(self._addr, base+3, counts >> 8)
+
+    def close(self):
+        self._bus.close()
+
+
 class PCA9685ServoBackend(ServoBackend):
-    """PCA9685 16-channel I2C PWM driver (Raspberry Pi)."""
+    """PCA9685 via Adafruit CircuitPython libs (requires adafruit-circuitpython-pca9685)."""
     def __init__(self, address: int = 0x40, frequency: int = 50):
         from adafruit_pca9685 import PCA9685
         import board, busio
@@ -105,6 +135,13 @@ def create_backend(config: dict) -> ServoBackend:
             config['serial_port'],
             config.get('serial_baud', 115200),
         )
+
+    if hw_type == 'smbus2':
+        addr = config.get('pca9685_address', 0x40)
+        if isinstance(addr, str):
+            addr = int(addr, 16)
+        bus_num = int(config.get('pca9685_i2c_bus', 1))
+        return Smbus2ServoBackend(addr, bus_num)
 
     if hw_type == 'pca9685':
         addr = config.get('pca9685_address', 0x40)
