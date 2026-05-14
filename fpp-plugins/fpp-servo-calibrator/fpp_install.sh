@@ -1,13 +1,12 @@
 #!/bin/bash
 # fpp-servo-calibrator installer
-set -e
-
 PLUGIN_DIR="$(cd "$(dirname "$0")" && pwd)"
 echo "Installing Animatronic Servo Calibrator plugin..."
 
 python3 -c "import smbus2" 2>/dev/null || \
     pip3 install --quiet smbus2 2>/dev/null || \
-    pip3 install --quiet --break-system-packages smbus2
+    pip3 install --quiet --break-system-packages smbus2 2>/dev/null || \
+    echo "WARNING: could not install smbus2 — install manually with: pip3 install --break-system-packages smbus2"
 chmod +x "$PLUGIN_DIR/servo_ctl.py"
 chmod +x "$PLUGIN_DIR/servo_daemon.py"
 
