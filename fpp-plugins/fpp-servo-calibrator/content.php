@@ -297,6 +297,7 @@ async function scSave() {
         el.textContent = '✓ Saved';
         document.querySelectorAll('.sc-strip').forEach(s => s.classList.remove('sc-dirty'));
         SC.dirty = {};
+        scCmd({ action: 'reload' }); // tell daemon to re-read co-other.json
     } else {
         el.style.color = '#e63946';
         el.textContent = '✗ Failed';
