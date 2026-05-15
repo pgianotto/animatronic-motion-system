@@ -105,4 +105,21 @@ EOF
     sudo systemctl reload apache2 2>/dev/null || true
 fi
 
+# ── Stamp HEAD SHA into pluginInfo.json so FPP plugin manager shows current ───
+HEAD_SHA=$(git -C "$PLUGIN_DIR" rev-parse HEAD 2>/dev/null || true)
+if [ -n "$HEAD_SHA" ]; then
+    python3 - << PYEOF
+import json, sys
+path = '$PLUGIN_DIR/pluginInfo.json'
+try:
+    info = json.loads(open(path).read())
+    for v in info.get('versions', []):
+        v['sha'] = '$HEAD_SHA'
+    open(path, 'w').write(json.dumps(info, indent=4) + '\n')
+    print('  pluginInfo.json sha updated to ${HEAD_SHA:0:8}')
+except Exception as e:
+    print(f'  WARNING: could not update pluginInfo.json sha: {e}')
+PYEOF
+fi
+
 echo "Done. Access via FPP menu: Plugins > Animatronic Capture"
