@@ -86,7 +86,9 @@ def export_xsq(
         f'    <sequenceDuration>{duration_s:.3f}</sequenceDuration>',
         '    <imageDir></imageDir>',
         '  </head>',
-        '  <ColorPalettes/>',
+        '  <ColorPalettes>',
+        '    <ColorPalette id="1" name=""></ColorPalette>',
+        '  </ColorPalettes>',
         '  <EffectDB/>',
         '  <ElementEffects>',
     ]
@@ -94,14 +96,18 @@ def export_xsq(
     for port_idx, (port_cfg, frame_us) in sorted(port_frames.items()):
         desc = port_cfg.get('description', '')
         model_name = f'Port {port_idx}' + (f' - {desc}' if desc else '')
+        mn = port_cfg.get('min', 500)
+        mx = port_cfg.get('max', 2500)
+        rng = max(1, mx - mn)
         lines.append(f'    <Element type="model" name="{model_name}">')
         lines.append('      <EffectLayer>')
         for i, us in enumerate(frame_us):
             t0 = i * step_time_ms
             t1 = t0 + step_time_ms
+            pct = max(0.0, min(100.0, (us - mn) / rng * 100))
             lines.append(
                 f'        <Effect type="Servo" startTime="{t0}" endTime="{t1}" '
-                f'settings="E_TEXTCTRL_Servo_Value={us},E_CHECKBOX_Servo_Advanced=0" palette="0"/>'
+                f'settings="E_TEXTCTRL_Servo_Value={pct:.1f},E_CHECKBOX_Servo_Advanced=0" palette="1"/>'
             )
         lines.append('      </EffectLayer>')
         lines.append('    </Element>')
