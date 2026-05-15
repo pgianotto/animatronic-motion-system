@@ -306,6 +306,21 @@ $step_time_ms = intval($cfg['step_time_ms'] ?? 50);
       set it to the channel pair shown above, type = 16-bit µs.
     </div>
   </div>
+
+  <hr class="pc-divider" style="margin:18px 0 14px;">
+  <div class="pc-sub-hdr" style="margin-bottom:6px;">xLights Sequence Export</div>
+  <p class="pc-hint">
+    Exports a paired <code>.xsq</code> + <code>.fseq</code> you can open directly in xLights.
+    Place both downloaded files in your xLights <em>sequences</em> folder, then open the <code>.xsq</code>.
+  </p>
+  <div class="pc-field">
+    <span class="pc-label">Base name</span>
+    <input class="pc-input" id="xsq-name" value="capture" style="width:180px;"
+           placeholder="no extension">
+    <button class="pc-btn btn-export" onclick="exportXlights()">Export for xLights</button>
+  </div>
+  <div id="xsq-msg" class="pc-msg"></div>
+  <div id="xsq-downloads" style="display:none; gap:8px; flex-wrap:wrap; margin-top:8px;"></div>
 </div>
 
 <!-- ══ Joint Mapping ══════════════════════════════════════════════════════ -->
@@ -613,6 +628,54 @@ function showXLightsMap(d) {
     }).join('');
     xl.style.display = 'block';
   }
+}
+
+// ── xLights export ───────────────────────────────────────────────────────
+
+function exportXlights() {
+  const name         = document.getElementById('xsq-name').value.trim() || 'capture';
+  const step_time_ms = getStepTimeMs();
+  const msg          = document.getElementById('xsq-msg');
+  const dl           = document.getElementById('xsq-downloads');
+  msg.style.color    = '#888';
+  msg.textContent    = 'Exporting…';
+  dl.style.display   = 'none';
+
+  fetch(API + '/api/config', {
+    method: 'POST', headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({step_time_ms})
+  });
+
+  fetch(API + '/api/export/xsq', {
+    method: 'POST', headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({filename: name, step_time_ms})
+  }).then(r => r.json()).then(d => {
+    if (d.ok) {
+      const fps = (1000 / step_time_ms).toFixed(step_time_ms < 100 ? 0 : 1);
+      msg.style.color = '#06d6a0';
+      msg.textContent = `✓ ${d.frames} frames · ${d.duration}s · ${d.channels} ch`;
+
+      dl.innerHTML = '';
+      [d.xsq_filename, d.fseq_filename].filter(Boolean).forEach(fn => {
+        const a = document.createElement('a');
+        a.href      = API + '/api/sequence/download/' + encodeURIComponent(fn);
+        a.className = 'pc-btn btn-ghost';
+        a.textContent = '↓ ' + fn;
+        a.download  = fn;
+        dl.appendChild(a);
+      });
+      dl.style.display = 'flex';
+
+      showXLightsMap(d);
+      if (d.xsq_error) {
+        msg.textContent += '  (XSQ error: ' + d.xsq_error + ')';
+        msg.style.color = '#fb8500';
+      }
+    } else {
+      msg.style.color = '#e63946';
+      msg.textContent = '✗ ' + d.error;
+    }
+  });
 }
 
 // ── Status poll ───────────────────────────────────────────────────────────

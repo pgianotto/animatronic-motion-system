@@ -6,9 +6,11 @@ into FPP's sequences folder so files appear in FPP's scheduler immediately.
 
 import json
 import os
+import signal
 import sys
 import threading
 import time
+import urllib.request
 from pathlib import Path
 
 PLUGIN_DIR   = Path(__file__).parent
@@ -31,6 +33,7 @@ from modes.motion_capture import MotionCaptureMode
 
 CFG_PATH      = Path('/home/fpp/media/config/animatronic_capture.json')
 CO_OTHER_PATH = Path('/home/fpp/media/config/co-other.json')
+CO_OTHER_API  = 'http://localhost/api/channel/output/co-other'
 FSEQ_DIR  = Path('/home/fpp/media/sequences')
 SESS_DIR  = Path('/home/fpp/media/animations')
 PORT      = 5002
@@ -76,11 +79,35 @@ NORM_RANGE = {
 }
 
 
+def _set_fpp_pca9685_output(enabled: bool):
+    try:
+        with urllib.request.urlopen(CO_OTHER_API, timeout=3) as resp:
+            cfg = json.loads(resp.read())
+        changed = False
+        for out in cfg.get('channelOutputs', []):
+            if out.get('type') == 'PCA9685':
+                out['enabled'] = 1 if enabled else 0
+                changed = True
+        if not changed:
+            return
+        if not enabled:
+            data = json.dumps(cfg).encode()
+            req  = urllib.request.Request(CO_OTHER_API, data=data, method='POST',
+                                          headers={'Content-Type': 'application/json'})
+            urllib.request.urlopen(req, timeout=3)
+            print('[Capture] FPP PCA9685 output disabled.')
+        else:
+            CO_OTHER_PATH.write_text(json.dumps(cfg, indent=2))
+            print('[Capture] FPP PCA9685 re-enabled in config (takes effect on next fppd restart).')
+    except Exception as exc:
+        print(f'[Capture] Could not toggle FPP PCA9685 output: {exc}')
+
+
 def _load_co_other(out_idx: int) -> dict | None:
     try:
         cfg     = json.loads(CO_OTHER_PATH.read_text())
         outputs = [o for o in cfg.get('channelOutputs', [])
-                   if o.get('ports') and o.get('enabled', 1)]
+                   if o.get('ports')]
         return outputs[out_idx] if 0 <= out_idx < len(outputs) else None
     except Exception:
         return None
@@ -373,6 +400,34 @@ class CaptureDaemon:
 
     # ── Export ───────────────────────────────────────────────────────────────
 
+    def export_xsq_bundle(self, base_filename: str, step_time_ms: int = None) -> dict:
+        """Export a paired FSEQ + XSQ for direct import into xLights."""
+        stem          = Path(base_filename).stem
+        fseq_filename = stem + '.fseq'
+        xsq_filename  = stem + '.xsq'
+        step_ms       = step_time_ms if step_time_ms is not None \
+                        else int(self.cfg.get('step_time_ms', 50))
+
+        result = self.export_fseq(fseq_filename, step_ms)
+        if not result['ok']:
+            return result
+
+        xsq_path = FSEQ_DIR / xsq_filename
+        try:
+            from xlights.xsq_writer import export_xsq
+            export_xsq(
+                fseq_filename=fseq_filename,
+                num_frames=result['frames'],
+                step_time_ms=step_ms,
+                output_path=str(xsq_path),
+            )
+            result['xsq_filename']  = xsq_filename
+            result['fseq_filename'] = fseq_filename
+        except Exception as exc:
+            result['xsq_error'] = str(exc)
+
+        return result
+
     def export_fseq(self, filename: str, step_time_ms: int = None) -> dict:
         frames = self._capture.get_frames()
         if not frames:
@@ -505,6 +560,24 @@ def api_export():
         filename += '.fseq'
     return jsonify(daemon.export_fseq(filename, step_ms))
 
+@app.route('/api/export/xsq', methods=['POST'])
+def api_export_xsq():
+    data     = request.get_json(force=True, silent=True) or {}
+    filename = data.get('filename', 'capture')
+    step_ms  = data.get('step_time_ms')
+    if step_ms is not None:
+        step_ms = max(10, min(500, int(step_ms)))
+    return jsonify(daemon.export_xsq_bundle(filename, step_ms))
+
+
+@app.route('/api/sequence/download/<path:filename>')
+def api_seq_download(filename):
+    safe = FSEQ_DIR / Path(filename).name   # strip any traversal
+    if not safe.exists():
+        return jsonify({'error': 'Not found'}), 404
+    return send_file(str(safe), as_attachment=True, download_name=safe.name)
+
+
 @app.route('/api/session/save', methods=['POST'])
 def api_sess_save():
     data     = request.get_json(force=True, silent=True) or {}
@@ -532,6 +605,7 @@ def api_get_cfg():
 @app.route('/api/config', methods=['POST'])
 def api_set_cfg():
     updates = request.get_json(force=True, silent=True) or {}
+    prev_live = daemon.cfg.get('live_output', False)
     daemon.cfg.update(updates)
     _save_cfg(daemon.cfg)
     if 'joint_map' in updates or 'pca_output_idx' in updates:
@@ -539,6 +613,12 @@ def api_set_cfg():
                               daemon.cfg.get('pca_output_idx', 0))
         out = daemon._mapper._out
         daemon._writer = PCA9685Writer(out) if out else None
+    if 'live_output' in updates:
+        new_live = daemon.cfg.get('live_output', False)
+        if new_live and not prev_live:
+            _set_fpp_pca9685_output(False)
+        elif not new_live and prev_live:
+            _set_fpp_pca9685_output(True)
     return jsonify({'ok': True})
 
 @app.route('/api/camera/release', methods=['POST'])
@@ -565,6 +645,14 @@ def stream():
                     mimetype='multipart/x-mixed-replace; boundary=frame')
 
 
+def _shutdown(sig, frame):
+    if daemon.cfg.get('live_output', False):
+        _set_fpp_pca9685_output(True)
+    sys.exit(0)
+
+
 if __name__ == '__main__':
+    signal.signal(signal.SIGTERM, _shutdown)
+    signal.signal(signal.SIGINT,  _shutdown)
     print(f'[Capture] Daemon starting on port {PORT}')
     app.run(host='0.0.0.0', port=PORT, threaded=True)
