@@ -106,7 +106,7 @@ def export_xsq(
             t1 = t0 + step_time_ms
             pct = max(0.0, min(100.0, (us - mn) / rng * 100))
             lines.append(
-                f'        <Effect type="Servo" startTime="{t0}" endTime="{t1}" '
+                f'        <Effect name="Servo" startTime="{t0}" endTime="{t1}" '
                 f'settings="E_TEXTCTRL_Servo_Value={pct:.1f},E_CHECKBOX_Servo_Advanced=0" palette="1"/>'
             )
         lines.append('      </EffectLayer>')
