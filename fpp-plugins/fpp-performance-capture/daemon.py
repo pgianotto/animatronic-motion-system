@@ -18,9 +18,8 @@ LIB_DIR      = PLUGIN_DIR / 'lib'
 PROJECT_ROOT = PLUGIN_DIR.parent.parent
 
 for search in (LIB_DIR, PROJECT_ROOT):
-    if (search / 'core').exists():
+    if (search / 'core').exists() and str(search) not in sys.path:
         sys.path.insert(0, str(search))
-        break
 
 import cv2
 import yaml
