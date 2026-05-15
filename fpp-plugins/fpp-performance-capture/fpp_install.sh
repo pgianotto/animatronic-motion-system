@@ -48,21 +48,30 @@ if [ ! -d "$PLUGIN_DIR/venv" ]; then
     fi
 fi
 
-# ── Copy shared Python core (always refresh on update) ───────────────────────
-PARENT="$(cd "$PLUGIN_DIR/../.." && pwd)"
-mkdir -p "$LIB_DIR"
+# ── Clone or update shared Python core from animatronic-motion-system ────────
+CORE_DIR="/home/fpp/media/animatronic"
+if [ -d "$CORE_DIR/.git" ]; then
+    echo "Updating shared core library..."
+    sudo chown -R fpp:fpp "$CORE_DIR/.git" 2>/dev/null || true
+    git -C "$CORE_DIR" pull --quiet 2>/dev/null || echo "  WARNING: git pull failed — using existing core"
+else
+    echo "Cloning shared core library..."
+    git clone --quiet https://github.com/pgianotto/animatronic-motion-system.git "$CORE_DIR" || \
+        echo "  WARNING: git clone failed — tracking code may not work"
+fi
 
+mkdir -p "$LIB_DIR"
 for d in core modes xlights; do
-    if [ -d "$PARENT/$d" ]; then
+    if [ -d "$CORE_DIR/$d" ]; then
         rm -rf "$LIB_DIR/$d"
-        cp -r "$PARENT/$d" "$LIB_DIR/$d"
+        cp -r "$CORE_DIR/$d" "$LIB_DIR/$d"
         echo "  Copied $d/"
     else
-        echo "  WARNING: $PARENT/$d not found — tracking code may not work."
+        echo "  WARNING: $CORE_DIR/$d not found — tracking code may not work."
     fi
 done
 
-[ -f "$PARENT/config.yaml" ] && cp "$PARENT/config.yaml" "$LIB_DIR/config.yaml"
+[ -f "$CORE_DIR/config.yaml" ] && cp "$CORE_DIR/config.yaml" "$LIB_DIR/config.yaml"
 
 # ── systemd service (always write so updates stay current) ────────────────────
 SERVICE="/etc/systemd/system/fpp-performance-capture.service"
