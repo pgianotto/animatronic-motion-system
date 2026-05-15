@@ -1,15 +1,38 @@
 """Generate an xLights XSQ sequence file with per-frame Servo effects.
 
-Each joint-mapped servo port becomes a model row with one Servo effect
-per captured frame. The user can open this XSQ directly in xLights, or
-use File > Import to merge it into an existing sequence (xLights will
-show a mapping UI so they can align our Port names to their models).
+Each joint-mapped servo port becomes a model row. Effect settings are stored
+in the EffectDB (deduplicated by value) and referenced by index from
+ElementEffects, matching the format xLights itself produces.
 """
 
 from pathlib import Path
-from typing import List
 
 from xlights.fseq_writer import NORM_RANGE, _interp
+
+_PALETTE = (
+    "C_BUTTON_Palette1=#ffffff,C_BUTTON_Palette2=#ff0000,"
+    "C_BUTTON_Palette3=#00ff00,C_BUTTON_Palette4=#0000ff,"
+    "C_BUTTON_Palette5=#ffff00,C_BUTTON_Palette6=#000000,"
+    "C_BUTTON_Palette7=#8080ff,C_BUTTON_Palette8=#ff00ff,"
+    "C_CHECKBOXBRIGHTNESSLEVEL=0,C_CHECKBOX_Chroma=0,"
+    "C_CHECKBOX_MusicSparkles=0,C_CHECKBOX_Palette1=0,"
+    "C_CHECKBOX_Palette2=0,C_CHECKBOX_Palette3=0,"
+    "C_CHECKBOX_Palette4=0,C_CHECKBOX_Palette5=0,"
+    "C_CHECKBOX_Palette6=0,C_CHECKBOX_Palette7=0,"
+    "C_CHECKBOX_Palette8=0,C_SLIDER_SparkleFrequency=0"
+)
+
+
+def _servo_settings(pct: float) -> str:
+    return (
+        f"E_CHECKBOX_16bit=1,E_CHECKBOX_Timing_Track=0,"
+        f"E_CHOICE_Channel=Servo1,"
+        f"E_TEXTCTRL_EndValue={pct:.1f},"
+        f"E_TEXTCTRL_Servo={pct:.1f},"
+        f"E_TOGGLEBUTTON_End=0,E_TOGGLEBUTTON_Start=0,"
+        f"T_CHECKBOX_Canvas=0,T_CHECKBOX_LayerMorph=0,"
+        f"T_CHOICE_LayerMethod=Normal,T_SLIDER_EffectLayerMix=0"
+    )
 
 
 def export_xsq(
@@ -20,19 +43,7 @@ def export_xsq(
     step_time_ms: int,
     output_path: str,
 ) -> str:
-    """Write an xLights 2026-format XSQ with Servo effects per mapped port.
-
-    Args:
-        fseq_filename: bare filename of the paired FSEQ, e.g. 'capture.fseq'
-        frames: list of CaptureFrame objects from the recording
-        joint_map: {joint_key: {port, invert, scale}}
-        co_other_out: output block from co-other.json (needs 'ports')
-        step_time_ms: milliseconds per frame
-        output_path: full path where the .xsq will be written
-
-    Returns:
-        output_path
-    """
+    """Write an xLights 2026-format XSQ with Servo effects per mapped port."""
     ports = co_other_out.get('ports', []) if co_other_out else []
     n_ports = len(ports)
 
@@ -41,8 +52,8 @@ def export_xsq(
     num_frames = max(1, int(total_ms / step_time_ms))
     duration_s = num_frames * step_time_ms / 1000.0
 
-    # Compute µs value per frame for each mapped port
-    port_frames = {}   # {port_idx: (port_cfg, [us_per_frame])}
+    # Compute 0-100% position per frame for each mapped port
+    port_frames = {}
     for joint_key, mapping in joint_map.items():
         port_idx = int(mapping.get('port', -1))
         if port_idx < 0 or port_idx >= n_ports:
@@ -54,7 +65,7 @@ def export_xsq(
         scale = float(mapping.get('scale', 1.0))
         invert = bool(mapping.get('invert', False))
         raw = [f.values.get(joint_key, (lo + hi) / 2) for f in frames]
-        frame_us = []
+        frame_pcts = []
         for i in range(num_frames):
             t = i * step_time_ms / 1000.0
             v = _interp(t, timestamps, raw)
@@ -63,9 +74,25 @@ def export_xsq(
             if invert:
                 t2 = 1.0 - t2
             t2 = max(0.0, min(1.0, t2))
-            us = max(mn, min(mx, round(mn + t2 * (mx - mn))))
-            frame_us.append(us)
-        port_frames[port_idx] = (p, frame_us)
+            us = mn + t2 * (mx - mn)
+            pct = round(max(0.0, min(100.0, (us - mn) / max(1, mx - mn) * 100)), 1)
+            frame_pcts.append(pct)
+        port_frames[port_idx] = (p, frame_pcts)
+
+    # Build deduplicated EffectDB — at most 1001 unique entries (0.0–100.0 in 0.1 steps)
+    db_lookup = {}  # settings_str -> ref index
+    db_list = []
+
+    port_refs = {}
+    for port_idx, (port_cfg, frame_pcts) in sorted(port_frames.items()):
+        refs = []
+        for pct in frame_pcts:
+            s = _servo_settings(pct)
+            if s not in db_lookup:
+                db_lookup[s] = len(db_list)
+                db_list.append(s)
+            refs.append(db_lookup[s])
+        port_refs[port_idx] = refs
 
     lines = [
         '<?xml version="1.0"?>',
@@ -87,35 +114,48 @@ def export_xsq(
         '    <imageDir></imageDir>',
         '  </head>',
         '  <ColorPalettes>',
-        '    <ColorPalette id="1" name=""></ColorPalette>',
+        f'    <ColorPalette>{_PALETTE}</ColorPalette>',
         '  </ColorPalettes>',
-        '  <EffectDB/>',
-        '  <ElementEffects>',
+        '  <EffectDB>',
     ]
-
-    for port_idx, (port_cfg, frame_us) in sorted(port_frames.items()):
+    for s in db_list:
+        lines.append(f'    <Effect>{s}</Effect>')
+    lines += [
+        '  </EffectDB>',
+        '  <SequenceMedia />',
+        '  <DataLayers>',
+        '    <DataLayer lor_params="0" channel_offset="0" num_channels="0" num_frames="0" '
+        'data="&lt;rendered: erase-mode>" source="&lt;auto-generated>" name="Nutcracker" />',
+        '  </DataLayers>',
+        '  <DisplayElements>',
+    ]
+    for port_idx, (port_cfg, _) in sorted(port_frames.items()):
         desc = port_cfg.get('description', '')
         model_name = f'Port {port_idx}' + (f' - {desc}' if desc else '')
-        mn = port_cfg.get('min', 500)
-        mx = port_cfg.get('max', 2500)
-        rng = max(1, mx - mn)
+        lines.append(
+            f'    <Element collapsed="false" type="model" name="{model_name}" visible="true" />'
+        )
+    lines += [
+        '  </DisplayElements>',
+        '  <ElementEffects>',
+    ]
+    for port_idx, (port_cfg, frame_pcts) in sorted(port_frames.items()):
+        desc = port_cfg.get('description', '')
+        model_name = f'Port {port_idx}' + (f' - {desc}' if desc else '')
+        refs = port_refs[port_idx]
         lines.append(f'    <Element type="model" name="{model_name}">')
         lines.append('      <EffectLayer>')
-        for i, us in enumerate(frame_us):
+        for i, ref in enumerate(refs):
             t0 = i * step_time_ms
             t1 = t0 + step_time_ms
-            pct = max(0.0, min(100.0, (us - mn) / rng * 100))
             lines.append(
-                f'        <Effect name="Servo" startTime="{t0}" endTime="{t1}" '
-                f'settings="E_TEXTCTRL_Servo_Value={pct:.1f},E_CHECKBOX_Servo_Advanced=0" palette="1"/>'
+                f'        <Effect ref="{ref}" name="Servo" startTime="{t0}" endTime="{t1}" palette="0" />'
             )
         lines.append('      </EffectLayer>')
         lines.append('    </Element>')
-
     lines += [
         '  </ElementEffects>',
-        '  <DataLayers/>',
-        '  <TimingTracks/>',
+        '  <lastView>0</lastView>',
         '</xsequence>',
     ]
 
