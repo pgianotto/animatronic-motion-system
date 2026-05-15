@@ -416,7 +416,9 @@ class CaptureDaemon:
             from xlights.xsq_writer import export_xsq
             export_xsq(
                 fseq_filename=fseq_filename,
-                num_frames=result['frames'],
+                frames=self._capture.get_frames(),
+                joint_map=self.cfg.get('joint_map', {}),
+                co_other_out=self._mapper._out,
                 step_time_ms=step_ms,
                 output_path=str(xsq_path),
             )

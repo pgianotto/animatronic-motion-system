@@ -1,59 +1,117 @@
-"""Generate a minimal xLights XSQ sequence file wrapping an FSEQ data layer.
+"""Generate an xLights XSQ sequence file with per-frame Servo effects.
 
-xLights reads the XSQ for timing/model info and loads channel data from the
-paired FSEQ via the DataLayer. Both files must be in the same xLights
-sequences folder so xLights can resolve the relative filename.
+Each joint-mapped servo port becomes a model row with one Servo effect
+per captured frame. The user can open this XSQ directly in xLights, or
+use File > Import to merge it into an existing sequence (xLights will
+show a mapping UI so they can align our Port names to their models).
 """
 
 from pathlib import Path
+from typing import List
+
+from xlights.fseq_writer import NORM_RANGE, _interp
 
 
 def export_xsq(
     fseq_filename: str,
-    num_frames: int,
+    frames,
+    joint_map: dict,
+    co_other_out: dict,
     step_time_ms: int,
     output_path: str,
 ) -> str:
-    """Write an xLights XSQ that references fseq_filename as a data layer.
+    """Write an xLights 2026-format XSQ with Servo effects per mapped port.
 
     Args:
-        fseq_filename: bare filename only, e.g. 'capture.fseq'
-        num_frames: total frames in the FSEQ
-        step_time_ms: milliseconds per frame (xLights 'timing' field)
-        output_path: full path where the .xsq file will be written
+        fseq_filename: bare filename of the paired FSEQ, e.g. 'capture.fseq'
+        frames: list of CaptureFrame objects from the recording
+        joint_map: {joint_key: {port, invert, scale}}
+        co_other_out: output block from co-other.json (needs 'ports')
+        step_time_ms: milliseconds per frame
+        output_path: full path where the .xsq will be written
 
     Returns:
         output_path
     """
-    name = Path(fseq_filename).stem
-    xml = (
-        '<?xml version="1.0" encoding="UTF-8"?>\n'
-        '<xsequence version="2.20" author="" music="" song="" artist="" album=""'
-        ' MusicURL="" comment="" ScaledTo="0" FixedPointTiming="1" MediaFile="">\n'
-        '  <head>\n'
-        '    <author></author>\n'
-        f'    <name>{name}</name>\n'
-        '    <song></song>\n'
-        '    <artist></artist>\n'
-        '    <album></album>\n'
-        '    <MusicURL></MusicURL>\n'
-        '    <comment>Exported by FPP Performance Capture</comment>\n'
-        '    <sequencetype>Unlighted</sequencetype>\n'
-        f'    <timing>{step_time_ms}</timing>\n'
-        '    <media></media>\n'
-        '    <version>2.20</version>\n'
-        '  </head>\n'
-        '  <ElementEffects/>\n'
-        '  <ColorPalettes/>\n'
-        '  <DataLayers>\n'
-        '    <DataLayer name="Erase at start" Enabled="1" filename=""'
-        ' desc="" DataReadSize="0" type="erase"/>\n'
-        f'    <DataLayer name="{fseq_filename}" Enabled="1"'
-        f' filename="{fseq_filename}" desc="" DataReadSize="0"'
-        ' type="fseq" channelOffset="0"/>\n'
-        '  </DataLayers>\n'
-        '  <TimingTracks/>\n'
-        '</xsequence>\n'
-    )
-    Path(output_path).write_text(xml, encoding='utf-8')
+    ports = co_other_out.get('ports', []) if co_other_out else []
+    n_ports = len(ports)
+
+    timestamps = [f.timestamp for f in frames]
+    total_ms = timestamps[-1] * 1000.0 if timestamps else 0
+    num_frames = max(1, int(total_ms / step_time_ms))
+    duration_s = num_frames * step_time_ms / 1000.0
+
+    # Compute µs value per frame for each mapped port
+    port_frames = {}   # {port_idx: (port_cfg, [us_per_frame])}
+    for joint_key, mapping in joint_map.items():
+        port_idx = int(mapping.get('port', -1))
+        if port_idx < 0 or port_idx >= n_ports:
+            continue
+        p = ports[port_idx]
+        mn = p.get('min', 500)
+        mx = p.get('max', 2500)
+        lo, hi = NORM_RANGE.get(joint_key, (0, 1))
+        scale = float(mapping.get('scale', 1.0))
+        invert = bool(mapping.get('invert', False))
+        raw = [f.values.get(joint_key, (lo + hi) / 2) for f in frames]
+        frame_us = []
+        for i in range(num_frames):
+            t = i * step_time_ms / 1000.0
+            v = _interp(t, timestamps, raw)
+            t_norm = max(0.0, min(1.0, (v - lo) / (hi - lo + 1e-9)))
+            t2 = 0.5 + (t_norm - 0.5) * scale
+            if invert:
+                t2 = 1.0 - t2
+            t2 = max(0.0, min(1.0, t2))
+            us = max(mn, min(mx, round(mn + t2 * (mx - mn))))
+            frame_us.append(us)
+        port_frames[port_idx] = (p, frame_us)
+
+    lines = [
+        '<?xml version="1.0"?>',
+        '<xsequence BaseChannel="0" ChanCtrlBasic="0" ChanCtrlColor="0" FixedPointTiming="1" ModelBlending="true">',
+        '  <head>',
+        '    <version>2026.07</version>',
+        '    <author></author>',
+        '    <author-email></author-email>',
+        '    <author-website></author-website>',
+        '    <song></song>',
+        '    <artist></artist>',
+        '    <album></album>',
+        '    <MusicURL></MusicURL>',
+        '    <comment>Exported by FPP Performance Capture</comment>',
+        f'    <sequenceTiming>{step_time_ms} ms</sequenceTiming>',
+        '    <sequenceType>Animation</sequenceType>',
+        '    <mediaFile></mediaFile>',
+        f'    <sequenceDuration>{duration_s:.3f}</sequenceDuration>',
+        '    <imageDir></imageDir>',
+        '  </head>',
+        '  <ColorPalettes/>',
+        '  <EffectDB/>',
+        '  <ElementEffects>',
+    ]
+
+    for port_idx, (port_cfg, frame_us) in sorted(port_frames.items()):
+        desc = port_cfg.get('description', '')
+        model_name = f'Port {port_idx}' + (f' - {desc}' if desc else '')
+        lines.append(f'    <Element type="model" name="{model_name}">')
+        lines.append('      <EffectLayer>')
+        for i, us in enumerate(frame_us):
+            t0 = i * step_time_ms
+            t1 = t0 + step_time_ms
+            lines.append(
+                f'        <Effect type="Servo" startTime="{t0}" endTime="{t1}" '
+                f'settings="E_TEXTCTRL_Servo_Value={us},E_CHECKBOX_Servo_Advanced=0" palette="0"/>'
+            )
+        lines.append('      </EffectLayer>')
+        lines.append('    </Element>')
+
+    lines += [
+        '  </ElementEffects>',
+        '  <DataLayers/>',
+        '  <TimingTracks/>',
+        '</xsequence>',
+    ]
+
+    Path(output_path).write_text('\n'.join(lines), encoding='utf-8')
     return output_path
