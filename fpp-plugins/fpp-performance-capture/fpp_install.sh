@@ -29,6 +29,7 @@ fi
 # cannot read; the venv symlink then breaks when systemd starts the service.
 if [ ! -d "$PLUGIN_DIR/venv" ]; then
     echo "Creating Python venv and installing packages..."
+    sudo chown -R fpp:fpp /home/fpp/.cache /home/fpp/.local 2>/dev/null || true
     if python3 -c "import sys; assert sys.version_info[:2] == (3,11)" 2>/dev/null; then
         sudo -u fpp python3 -m venv "$PLUGIN_DIR/venv"
         sudo -u fpp "$PLUGIN_DIR/venv/bin/pip" install --quiet \
@@ -36,12 +37,12 @@ if [ ! -d "$PLUGIN_DIR/venv" ]; then
         sudo -u fpp "$PLUGIN_DIR/venv/bin/pip" install --quiet \
             flask pyyaml smbus2 "mediapipe==0.10.9"
     else
-        sudo -u fpp env HOME=/home/fpp PATH=/usr/local/bin:/usr/bin:/bin \
+        sudo -u fpp env HOME=/home/fpp PATH=/usr/local/bin:/usr/bin:/bin UV_NO_CACHE=1 \
             uv venv --python 3.11 "$PLUGIN_DIR/venv"
-        sudo -u fpp env HOME=/home/fpp PATH=/usr/local/bin:/usr/bin:/bin \
+        sudo -u fpp env HOME=/home/fpp PATH=/usr/local/bin:/usr/bin:/bin UV_NO_CACHE=1 \
             uv pip install --python "$PLUGIN_DIR/venv/bin/python" \
             flask pyyaml smbus2 "mediapipe==0.10.9" RPi.GPIO 2>/dev/null || \
-        sudo -u fpp env HOME=/home/fpp PATH=/usr/local/bin:/usr/bin:/bin \
+        sudo -u fpp env HOME=/home/fpp PATH=/usr/local/bin:/usr/bin:/bin UV_NO_CACHE=1 \
             uv pip install --python "$PLUGIN_DIR/venv/bin/python" \
             flask pyyaml smbus2 "mediapipe==0.10.9"
     fi
