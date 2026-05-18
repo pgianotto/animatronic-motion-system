@@ -143,6 +143,8 @@ $step_time_ms = intval($cfg['step_time_ms'] ?? 50);
              border-radius:4px; padding:3px 6px; font-size:11px; max-width:170px; }
 .jm-scale-in { background:var(--accent); color:var(--fg); border:1px solid #555;
                border-radius:4px; padding:3px 6px; font-size:11px; width:54px; text-align:center; }
+.jm-model-in { background:var(--accent); color:var(--fg); border:1px solid #555;
+               border-radius:4px; padding:3px 6px; font-size:11px; width:130px; }
 
 /* ── Messages / hints ──────────────────────────────────────────────────── */
 .pc-msg  { font-size:11px; min-height:16px; }
@@ -371,10 +373,11 @@ $step_time_ms = intval($cfg['step_time_ms'] ?? 50);
       <tr>
         <th>Joint</th><th>Live Value</th><th>Port</th>
         <th style="text-align:center;">Invert</th><th>Scale %</th>
+        <th>xLights Model</th>
       </tr>
     </thead>
     <tbody id="jm-tbody">
-      <tr><td colspan="5" style="color:#555; font-style:italic; padding:12px 8px;">
+      <tr><td colspan="6" style="color:#555; font-style:italic; padding:12px 8px;">
         Loading servo ports…
       </td></tr>
     </tbody>
@@ -385,18 +388,6 @@ $step_time_ms = intval($cfg['step_time_ms'] ?? 50);
 <!-- ══ Settings ═════════════════════════════════════════════════════════ -->
 <div class="pc-card">
   <h3>Settings</h3>
-
-  <!-- xLights model name -->
-  <div style="margin-bottom:16px;">
-    <div style="color:var(--muted); font-size:11px; margin-bottom:4px;">
-      xLights Model Name
-      <span style="color:#444; font-size:10px; margin-left:4px;">must match the model name in your xLights show for XSQ export</span>
-    </div>
-    <div style="display:flex; align-items:center; gap:8px; max-width:320px;">
-      <input class="pc-input" id="xlights-model-name" style="flex:1;"
-             value="<?= htmlspecialchars($cfg['xlights_model_name'] ?? 'DmxServo') ?>">
-    </div>
-  </div>
 
   <div style="display:grid; grid-template-columns:1fr 1fr; gap:16px 32px; max-width:600px;">
     <div>
@@ -786,12 +777,13 @@ function buildJointTable(ports, jointMap) {
     if (j.group !== lastGroup) {
       lastGroup = j.group;
       const color = j.group === 'face' ? '#4cc9f0' : '#fb8500';
-      rows.push(`<tr><td colspan="5" style="padding:8px 8px 2px; color:${color};
+      rows.push(`<tr><td colspan="6" style="padding:8px 8px 2px; color:${color};
         font-size:10px; font-weight:bold; letter-spacing:1px;">${j.group === 'face' ? 'Face' : 'Body'}</td></tr>`);
     }
-    const m   = jointMap[j.key] || {};
-    const sel = m.port !== undefined ? m.port : -1;
-    const sc  = m.scale !== undefined ? Math.round(m.scale * 100) : 100;
+    const m    = jointMap[j.key] || {};
+    const sel  = m.port !== undefined ? m.port : -1;
+    const sc   = m.scale !== undefined ? Math.round(m.scale * 100) : 100;
+    const mdl  = m.xlights_model || '';
     const opts = portOpts.replace(`value="${sel}"`, `value="${sel}" selected`);
     rows.push(`<tr>
       <td style="color:${j.group==='face'?'#4cc9f0':'#fb8500'}; font-size:11px;">${j.label}</td>
@@ -802,6 +794,7 @@ function buildJointTable(ports, jointMap) {
       <td><select class="jm-sel" id="jm-port-${j.key}">${opts}</select></td>
       <td style="text-align:center;"><input type="checkbox" id="jm-inv-${j.key}" ${m.invert?'checked':''}></td>
       <td><input type="number" class="jm-scale-in" id="jm-scale-${j.key}" value="${sc}" min="0" max="200" step="5"></td>
+      <td><input type="text" class="jm-model-in" id="jm-model-${j.key}" value="${mdl}" placeholder="e.g. Mickey.Arm"></td>
     </tr>`);
   }
   tbody.innerHTML = rows.join('');
@@ -825,10 +818,12 @@ function saveJointMap() {
   JOINTS.forEach(j => {
     const port = parseInt((document.getElementById('jm-port-'+j.key)||{}).value, 10);
     if (isNaN(port) || port < 0) return;
+    const mdl = ((document.getElementById('jm-model-'+j.key)||{}).value||'').trim();
     map[j.key] = {
       port,
-      invert: !!(document.getElementById('jm-inv-'+j.key)||{}).checked,
-      scale:  parseFloat((document.getElementById('jm-scale-'+j.key)||{}).value||100) / 100,
+      invert:        !!(document.getElementById('jm-inv-'+j.key)||{}).checked,
+      scale:         parseFloat((document.getElementById('jm-scale-'+j.key)||{}).value||100) / 100,
+      xlights_model: mdl,
     };
   });
   fetch(API + '/api/config', {
@@ -866,9 +861,8 @@ function saveSmoothing() {
   fetch(API + '/api/config', {
     method:'POST', headers:{'Content-Type':'application/json'},
     body: JSON.stringify({
-      smoothing:          parseFloat(document.getElementById('sl-smoothing').value),
-      servo_smoothing:    parseFloat(document.getElementById('sl-servo').value),
-      xlights_model_name: (document.getElementById('xlights-model-name').value.trim() || 'DmxServo'),
+      smoothing:       parseFloat(document.getElementById('sl-smoothing').value),
+      servo_smoothing: parseFloat(document.getElementById('sl-servo').value),
     })
   }).then(r => r.json()).then(d => {
     const el = document.getElementById('settings-msg');
