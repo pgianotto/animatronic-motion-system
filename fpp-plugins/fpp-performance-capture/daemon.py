@@ -266,6 +266,7 @@ class CaptureDaemon:
 
         self._servo_pos:  dict = {}
         self._pb_thread: threading.Thread = None
+        self._session_name = ''
         self._pb_stop    = threading.Event()
         self._pb_pause   = threading.Event()
         self._pb_playing = False
@@ -341,16 +342,20 @@ class CaptureDaemon:
 
     # ── Playback ─────────────────────────────────────────────────────────────
 
-    def start_playback(self) -> bool:
+    def start_playback(self, start_idx: int = 0) -> bool:
         frames = self._capture.get_frames()
         if not frames:
             return False
+        start_idx = max(0, min(start_idx, len(frames) - 1))
+        if self._pb_thread and self._pb_thread.is_alive():
+            self._pb_stop.set()
+            self._pb_pause.clear()
         self._pb_stop.clear()
         self._pb_pause.clear()
         self._pb_playing = True
-        self._pb_pos     = 0
+        self._pb_pos     = start_idx
         self._pb_thread  = threading.Thread(
-            target=self._playback_loop, args=(frames,), daemon=True)
+            target=self._playback_loop, args=(frames, start_idx), daemon=True)
         self._pb_thread.start()
         return True
 
@@ -365,11 +370,12 @@ class CaptureDaemon:
         self._pb_pause.clear()
         self._pb_playing = False
 
-    def _playback_loop(self, frames):
-        start      = time.time()
+    def _playback_loop(self, frames, start_idx: int = 0):
+        wall_start  = time.time() - frames[start_idx].timestamp
         pause_since = None
-        total      = len(frames)
-        for i, frame in enumerate(frames):
+        total       = len(frames)
+        for i in range(start_idx, total):
+            frame = frames[i]
             if self._pb_stop.is_set():
                 break
             while self._pb_pause.is_set() and not self._pb_stop.is_set():
@@ -377,11 +383,11 @@ class CaptureDaemon:
                     pause_since = time.time()
                 time.sleep(0.02)
             if pause_since is not None:
-                start += time.time() - pause_since
+                wall_start += time.time() - pause_since
                 pause_since = None
             if self._pb_stop.is_set():
                 break
-            target = start + frame.timestamp
+            target = wall_start + frame.timestamp
             wait = target - time.time()
             if wait > 0:
                 time.sleep(wait)
@@ -470,6 +476,7 @@ class CaptureDaemon:
     def load_session(self, filename: str) -> dict:
         path = SESS_DIR / filename
         if self._capture.load_session(str(path)):
+            self._session_name = filename
             return {'ok': True, 'frames': self._capture.frame_count,
                     'duration': round(self._capture.duration, 2)}
         return {'ok': False, 'error': f'Could not load {filename}'}
@@ -494,7 +501,9 @@ class CaptureDaemon:
             'playing':      self._pb_playing,
             'paused':       self._pb_pause.is_set(),
             'frame_count':  self._capture.frame_count,
+            'duration':     round(dur, 2),
             'duration_str': f'{int(m):02d}:{s:04.1f}',
+            'session_name': self._session_name,
             'pb_pos':       self._pb_pos,
             'pb_timestamp': round(pb_ts, 2),
             'values':       {k: round(v, 3) for k, v in self._values.items()},
@@ -535,9 +544,55 @@ def api_rec_stop():
     daemon.stop_recording()
     return jsonify(daemon.status())
 
+@app.route('/api/session/frames')
+def api_sess_frames():
+    """Return downsampled waveform data for canvas drawing."""
+    frames = daemon._capture.get_frames()
+    if not frames:
+        return jsonify({'total_frames': 0, 'duration': 0,
+                        'timestamps': [], 'data': {}, 'servo_mapped': []})
+    n    = len(frames)
+    step = max(1, n // 500)
+    idxs = list(range(0, n, step))
+    if idxs[-1] != n - 1:
+        idxs.append(n - 1)
+    keys = list(frames[0].values.keys())
+    return jsonify({
+        'total_frames': n,
+        'duration':     round(frames[-1].timestamp, 2),
+        'timestamps':   [round(frames[i].timestamp, 3) for i in idxs],
+        'data':         {k: [round(frames[i].values.get(k, 0.0), 3) for i in idxs]
+                         for k in keys},
+        'servo_mapped': list(daemon.cfg.get('joint_map', {}).keys()),
+    })
+
+
+@app.route('/api/playback/seek', methods=['POST'])
+def api_pb_seek():
+    """Seek to a frame, drive servos to that position."""
+    data  = request.get_json(force=True, silent=True) or {}
+    idx   = int(data.get('frame', 0))
+    frames = daemon._capture.get_frames()
+    if not frames:
+        return jsonify({'ok': False, 'error': 'No frames'})
+    idx = max(0, min(idx, len(frames) - 1))
+    daemon._pb_pos = idx
+    frame = frames[idx]
+    daemon._capture.play_frame(frame.values)
+    cmds = daemon._mapper.compute(frame.values)
+    if cmds:
+        cmds = daemon._smooth_servos(cmds)
+        if daemon._writer:
+            daemon._writer.set_channels(cmds)
+    return jsonify({'ok': True, 'frame': idx,
+                    'timestamp': round(frame.timestamp, 2)})
+
+
 @app.route('/api/playback/start', methods=['POST'])
 def api_pb_start():
-    ok = daemon.start_playback()
+    data      = request.get_json(force=True, silent=True) or {}
+    start_idx = int(data.get('frame', 0))
+    ok = daemon.start_playback(start_idx)
     return jsonify({'ok': ok})
 
 @app.route('/api/playback/pause', methods=['POST'])

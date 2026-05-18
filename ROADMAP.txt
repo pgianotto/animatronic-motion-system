@@ -35,7 +35,7 @@ PHASE 3 - MOTION CAPTURE MODE
 [x] Exponential smoothing for stable servo output
 [x] Real-time servo preview (animatronic mirrors your movements while recording)
 [x] Session recording with per-frame timestamps
-[ ] Playback / scrub review before export
+[x] Playback / scrub review before export
 [ ] Body pose tracking (shoulders, arms) via MediaPipe Pose
 
 PHASE 4 - XLIGHTS INTEGRATION

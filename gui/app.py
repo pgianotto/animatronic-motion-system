@@ -29,6 +29,7 @@ from core.tracker import Tracker
 from modes.live_tracking import LiveTrackingMode
 from modes.motion_capture import MotionCaptureMode
 from xlights.fseq_writer import export_fseq
+from gui.review import ReviewWindow
 
 # ── Palette ─────────────────────────────────────────────────────────────────
 _BG      = '#1a1a2e'
@@ -124,6 +125,9 @@ class AnimatronicApp:
         self._pb_pause_evt: Optional[threading.Event] = None
         self._pb_playing    = False
         self._pb_paused     = False
+
+        # Review / scrub window (created on demand)
+        self._review_win: Optional[ReviewWindow] = None
 
         self._setup_styles()
         self._build_ui()
@@ -282,11 +286,11 @@ class AnimatronicApp:
         p = self._panel_capture
 
         _lbl(p, "PERFORMANCE CAPTURE", fg=_MAGENTA,
-             font=('Helvetica', 12, 'bold')).pack(pady=(10, 2))
+             font=('Helvetica', 12, 'bold')).pack(pady=(3, 1))
         _lbl(p, "Performer drives servos live. Record and export to xLights.",
              fg=_MUTED, font=('Helvetica', 8, 'italic')).pack()
 
-        _sep(p, _MAGENTA)
+        tk.Frame(p, bg=_MAGENTA, height=1).pack(fill=tk.X, pady=3)
 
         # Tracked values — two columns: Face (cyan) | Body (amber)
         tv = tk.Frame(p, bg=_BG)
@@ -326,13 +330,13 @@ class AnimatronicApp:
         ]:
             self._tracked_vars[key] = self._tracked_row(body_col, label, _AMBER)
 
-        _sep(p)
+        tk.Frame(p, bg=_MUTED, height=1).pack(fill=tk.X, pady=3)
 
         self._rec_info = _lbl(p, "00:00.0  |  0 frames", fg=_MUTED, font=('Helvetica', 8))
-        self._rec_info.pack(pady=2)
+        self._rec_info.pack(pady=1)
 
         self._rec_btn = _btn(p, "RECORD", _MAGENTA, '#fff', self._toggle_rec)
-        self._rec_btn.pack(pady=4, padx=12, fill=tk.X)
+        self._rec_btn.pack(pady=2, padx=12, fill=tk.X)
 
         export_row = tk.Frame(p, bg=_BG)
         export_row.pack(pady=2, padx=12, fill=tk.X)
@@ -341,20 +345,24 @@ class AnimatronicApp:
         _btn(export_row, "SAVE SESSION", _ACCENT, _CYAN, self._save_session).pack(
             side=tk.LEFT, fill=tk.X, expand=True, padx=(3, 0))
 
-        _sep(p)
+        tk.Frame(p, bg=_MUTED, height=1).pack(fill=tk.X, pady=3)
 
         self._pb_info = _lbl(p, "No session loaded", fg=_MUTED, font=('Helvetica', 8))
-        self._pb_info.pack(pady=2)
+        self._pb_info.pack(pady=1)
 
         pb_row = tk.Frame(p, bg=_BG)
-        pb_row.pack(pady=4, padx=12, fill=tk.X)
+        pb_row.pack(pady=2, padx=12, fill=tk.X)
         self._pb_btn = _btn(pb_row, "▶  PLAY", _GREEN, '#000', self._toggle_playback)
         self._pb_btn.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(0, 3))
         self._pb_stop_btn = _btn(pb_row, "■  STOP", _MUTED, '#fff', self._stop_playback)
         self._pb_stop_btn.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(3, 0))
 
-        _btn(p, "LOAD SESSION", _PANEL, _CYAN, self._load_session).pack(
-            pady=2, padx=12, fill=tk.X)
+        session_row = tk.Frame(p, bg=_BG)
+        session_row.pack(pady=2, padx=12, fill=tk.X)
+        _btn(session_row, "LOAD SESSION", _PANEL, _CYAN, self._load_session).pack(
+            side=tk.LEFT, fill=tk.X, expand=True, padx=(0, 3))
+        _btn(session_row, "REVIEW / SCRUB", _AMBER, '#000', self._open_review).pack(
+            side=tk.LEFT, fill=tk.X, expand=True, padx=(3, 0))
 
     def _tracked_row(self, parent, label: str, color: str) -> tk.StringVar:
         row = tk.Frame(parent, bg=_BG)
@@ -890,6 +898,8 @@ class AnimatronicApp:
             n, dur = self._capture_mode.frame_count, self._capture_mode.duration
             self._status_var.set(
                 f"Performance Capture  —  {n} frames  ({dur:.1f}s) recorded")
+            if self._review_win is not None and self._review_win.exists:
+                self._review_win.refresh()
 
     def _export_fseq(self):
         frames = self._capture_mode.get_frames()
@@ -956,26 +966,56 @@ class AnimatronicApp:
             self._pb_info.config(
                 text=f"Loaded  {n} frames  ({dur:.1f}s)", fg=_CYAN)
             self._status_var.set(f"Session loaded — {n} frames  ({dur:.1f}s)")
+            if self._review_win is not None and self._review_win.exists:
+                self._review_win.refresh()
         else:
             messagebox.showerror("Load Error", "Could not read session file.")
 
+    def _start_playback(self, start_idx: int = 0):
+        frames = self._capture_mode.get_frames()
+        if not frames or start_idx >= len(frames):
+            messagebox.showwarning("No Data", "Record or load a session first.")
+            return
+        # Signal any running playback thread to exit
+        if self._pb_stop_evt:
+            self._pb_stop_evt.set()
+        if self._pb_pause_evt:
+            self._pb_pause_evt.clear()
+        self._pb_stop_evt  = threading.Event()
+        self._pb_pause_evt = threading.Event()
+        self._pb_playing   = True
+        self._pb_paused    = False
+        self._pb_btn.config(text="⏸  PAUSE", bg=_AMBER)
+        self._pb_stop_btn.config(bg=_RED)
+        threading.Thread(
+            target=self._playback_loop,
+            args=(frames, start_idx, self._pb_stop_evt, self._pb_pause_evt),
+            daemon=True,
+        ).start()
+
+    def _open_review(self):
+        if not self._capture_mode.get_frames():
+            messagebox.showwarning("No Data", "Record or load a session first.")
+            return
+        if self._review_win is not None and self._review_win.exists:
+            self._review_win.refresh()
+            self._review_win.show()
+        else:
+            self._review_win = ReviewWindow(
+                self._root,
+                get_frames    = self._capture_mode.get_frames,
+                get_config    = lambda: self._cfg,
+                on_seek_servo = self._capture_mode.play_frame,
+                on_play_from  = self._review_play_from,
+                on_stop       = self._stop_playback,
+            )
+
+    def _review_play_from(self, idx: int):
+        self._start_playback(idx)
+
     def _toggle_playback(self):
         if not self._pb_playing:
-            frames = self._capture_mode.get_frames()
-            if not frames:
-                messagebox.showwarning("No Data", "Record or load a session first.")
-                return
-            self._pb_stop_evt  = threading.Event()
-            self._pb_pause_evt = threading.Event()
-            self._pb_playing   = True
-            self._pb_paused    = False
-            self._pb_btn.config(text="⏸  PAUSE", bg=_AMBER)
-            self._pb_stop_btn.config(bg=_RED)
-            threading.Thread(
-                target=self._playback_loop,
-                args=(frames, self._pb_stop_evt, self._pb_pause_evt),
-                daemon=True,
-            ).start()
+            self._start_playback(0)
         elif self._pb_paused:
             self._pb_pause_evt.clear()
             self._pb_paused = False
@@ -991,30 +1031,32 @@ class AnimatronicApp:
         if self._pb_pause_evt:
             self._pb_pause_evt.clear()
 
-    def _playback_loop(self, frames, stop_evt, pause_evt):
+    def _playback_loop(self, frames, start_idx, stop_evt, pause_evt):
         import time as _time
-        start      = _time.time()
+        # Offset wall clock so frame[start_idx] plays immediately
+        wall_start  = _time.time() - frames[start_idx].timestamp
         pause_since: Optional[float] = None
-        total      = len(frames)
+        total = len(frames)
 
-        for i, frame in enumerate(frames):
+        for i in range(start_idx, total):
+            frame = frames[i]
             if stop_evt.is_set():
                 break
 
-            # Pause handling — adjust start to absorb pause duration
+            # Pause handling — shift wall_start forward by paused duration
             while pause_evt.is_set() and not stop_evt.is_set():
                 if pause_since is None:
                     pause_since = _time.time()
                 _time.sleep(0.02)
             if pause_since is not None:
-                start += _time.time() - pause_since
+                wall_start += _time.time() - pause_since
                 pause_since = None
 
             if stop_evt.is_set():
                 break
 
             # Accurate frame timing
-            target = start + frame.timestamp
+            target = wall_start + frame.timestamp
             wait   = target - _time.time()
             if wait > 0:
                 _time.sleep(wait)
@@ -1035,8 +1077,13 @@ class AnimatronicApp:
             text=f"{int(m):02d}:{s:04.1f} / {int(dm):02d}:{ds:04.1f}  ({idx+1}/{total})",
             fg=_GREEN,
         )
-        for key, var in self._tracked_vars.items():
-            var.set(f"{self._capture_mode.get_frames()[idx].values.get(key, 0.0):+.2f}")
+        frames = self._capture_mode.get_frames()
+        if 0 <= idx < len(frames):
+            vals = frames[idx].values
+            for key, var in self._tracked_vars.items():
+                var.set(f"{vals.get(key, 0.0):+.2f}")
+        if self._review_win is not None and self._review_win.exists:
+            self._review_win.update_cursor(idx)
 
     def _on_playback_done(self):
         self._pb_playing = False
