@@ -1,8 +1,13 @@
 """Generate an xLights XSQ sequence file with per-frame Servo effects.
 
-Each joint-mapped servo port becomes a model row. Effect settings are stored
-in the EffectDB (deduplicated by value) and referenced by index from
-ElementEffects, matching the format xLights itself produces.
+All servo ports are placed as EffectLayers inside a single Element whose
+name matches the user's xLights model (default: "DmxServo"). Ports are
+numbered Servo1, Servo2, … in port-index order so xLights can route each
+layer to the correct servo channel within the model.
+
+Effect settings are stored in the EffectDB (deduplicated by value+channel)
+and referenced by index from ElementEffects, matching the format xLights
+itself produces.
 """
 
 from pathlib import Path
@@ -23,10 +28,10 @@ _PALETTE = (
 )
 
 
-def _servo_settings(pct: float) -> str:
+def _servo_settings(pct: float, servo_num: int) -> str:
     return (
         f"E_CHECKBOX_16bit=1,E_CHECKBOX_Timing_Track=0,"
-        f"E_CHOICE_Channel=Servo1,"
+        f"E_CHOICE_Channel=Servo{servo_num},"
         f"E_TEXTCTRL_EndValue={pct:.1f},"
         f"E_TEXTCTRL_Servo={pct:.1f},"
         f"E_TOGGLEBUTTON_End=0,E_TOGGLEBUTTON_Start=0,"
@@ -42,57 +47,77 @@ def export_xsq(
     co_other_out: dict,
     step_time_ms: int,
     output_path: str,
+    model_name: str = "DmxServo",
 ) -> str:
-    """Write an xLights 2026-format XSQ with Servo effects per mapped port."""
-    ports = co_other_out.get('ports', []) if co_other_out else []
+    """Write an xLights 2026-format XSQ with Servo effects per mapped port.
+
+    All ports are written as EffectLayers inside one Element named model_name.
+    Ports are assigned Servo1, Servo2, … in ascending port-index order so the
+    channel numbering matches how xLights enumerates sub-channels in a model.
+    """
+    ports   = co_other_out.get('ports', []) if co_other_out else []
     n_ports = len(ports)
 
     timestamps = [f.timestamp for f in frames]
-    total_ms = timestamps[-1] * 1000.0 if timestamps else 0
+    total_ms   = timestamps[-1] * 1000.0 if timestamps else 0
     num_frames = max(1, int(total_ms / step_time_ms))
     duration_s = num_frames * step_time_ms / 1000.0
 
-    # Compute 0-100% position per frame for each mapped port
-    port_frames = {}
+    # Build one entry per unique port index, in ascending order.
+    # If multiple joints share a port, the first one (alphabetically) wins.
+    port_joint = {}
     for joint_key, mapping in joint_map.items():
-        port_idx = int(mapping.get('port', -1))
-        if port_idx < 0 or port_idx >= n_ports:
+        idx = int(mapping.get('port', -1))
+        if idx < 0 or idx >= n_ports:
             continue
-        p = ports[port_idx]
-        mn = p.get('min', 500)
-        mx = p.get('max', 2500)
+        if idx not in port_joint or joint_key < port_joint[idx][0]:
+            port_joint[idx] = (joint_key, mapping)
+
+    # sorted port indices → Servo1, Servo2, …
+    sorted_ports = sorted(port_joint.keys())
+
+    # Compute 0-100% position per frame for each port
+    layers = []  # list of (servo_num, port_desc, frame_pcts)
+    for servo_num, port_idx in enumerate(sorted_ports, start=1):
+        joint_key, mapping = port_joint[port_idx]
+        p      = ports[port_idx]
+        mn     = p.get('min',    500)
+        mx     = p.get('max',   2500)
         lo, hi = NORM_RANGE.get(joint_key, (0, 1))
-        scale = float(mapping.get('scale', 1.0))
+        scale  = float(mapping.get('scale',  1.0))
         invert = bool(mapping.get('invert', False))
-        raw = [f.values.get(joint_key, (lo + hi) / 2) for f in frames]
+        raw    = [f.values.get(joint_key, (lo + hi) / 2) for f in frames]
+
         frame_pcts = []
         for i in range(num_frames):
-            t = i * step_time_ms / 1000.0
-            v = _interp(t, timestamps, raw)
+            t      = i * step_time_ms / 1000.0
+            v      = _interp(t, timestamps, raw)
             t_norm = max(0.0, min(1.0, (v - lo) / (hi - lo + 1e-9)))
-            t2 = 0.5 + (t_norm - 0.5) * scale
+            t2     = 0.5 + (t_norm - 0.5) * scale
             if invert:
                 t2 = 1.0 - t2
-            t2 = max(0.0, min(1.0, t2))
-            us = mn + t2 * (mx - mn)
+            t2  = max(0.0, min(1.0, t2))
+            us  = mn + t2 * (mx - mn)
             pct = round(max(0.0, min(100.0, (us - mn) / max(1, mx - mn) * 100)), 1)
             frame_pcts.append(pct)
-        port_frames[port_idx] = (p, frame_pcts)
 
-    # Build deduplicated EffectDB — at most 1001 unique entries (0.0–100.0 in 0.1 steps)
-    db_lookup = {}  # settings_str -> ref index
-    db_list = []
+        desc = p.get('description', f'Port {port_idx}')
+        layers.append((servo_num, desc, frame_pcts))
 
-    port_refs = {}
-    for port_idx, (port_cfg, frame_pcts) in sorted(port_frames.items()):
+    # Build deduplicated EffectDB keyed by (pct, servo_num) settings string
+    db_lookup = {}  # settings_str -> index
+    db_list   = []
+
+    layer_refs = []  # per layer: list of ref indices
+    for servo_num, desc, frame_pcts in layers:
         refs = []
         for pct in frame_pcts:
-            s = _servo_settings(pct)
+            s = _servo_settings(pct, servo_num)
             if s not in db_lookup:
                 db_lookup[s] = len(db_list)
                 db_list.append(s)
             refs.append(db_lookup[s])
-        port_refs[port_idx] = refs
+        layer_refs.append(refs)
 
     lines = [
         '<?xml version="1.0"?>',
@@ -128,23 +153,15 @@ def export_xsq(
         'data="&lt;rendered: erase-mode>" source="&lt;auto-generated>" name="Nutcracker" />',
         '  </DataLayers>',
         '  <DisplayElements>',
-    ]
-    for port_idx, (port_cfg, _) in sorted(port_frames.items()):
-        desc = port_cfg.get('description', '')
-        model_name = f'Port {port_idx}' + (f' - {desc}' if desc else '')
-        lines.append(
-            f'    <Element collapsed="false" type="model" name="{model_name}" visible="true" />'
-        )
-    lines += [
+        f'    <Element collapsed="false" type="model" name="{model_name}" visible="true" />',
         '  </DisplayElements>',
         '  <ElementEffects>',
+        f'    <Element type="model" name="{model_name}">',
     ]
-    for port_idx, (port_cfg, frame_pcts) in sorted(port_frames.items()):
-        desc = port_cfg.get('description', '')
-        model_name = f'Port {port_idx}' + (f' - {desc}' if desc else '')
-        refs = port_refs[port_idx]
-        lines.append(f'    <Element type="model" name="{model_name}">')
-        lines.append('      <EffectLayer>')
+
+    for li, (servo_num, desc, frame_pcts) in enumerate(layers):
+        refs = layer_refs[li]
+        lines.append(f'      <EffectLayer><!-- Servo{servo_num}: {desc} -->')
         for i, ref in enumerate(refs):
             t0 = i * step_time_ms
             t1 = t0 + step_time_ms
@@ -152,12 +169,17 @@ def export_xsq(
                 f'        <Effect ref="{ref}" name="Servo" startTime="{t0}" endTime="{t1}" palette="0" />'
             )
         lines.append('      </EffectLayer>')
-        lines.append('    </Element>')
+
     lines += [
+        '    </Element>',
         '  </ElementEffects>',
         '  <lastView>0</lastView>',
-        '</xsequence>',
+        '  <TimingTags>',
     ]
+    for i in range(10):
+        lines.append(f'    <Tag number="{i}" position="-1" />')
+    lines.append('  </TimingTags>')
+    lines.append('</xsequence>')
 
     Path(output_path).write_text('\n'.join(lines), encoding='utf-8')
     return output_path

@@ -52,6 +52,7 @@ DEFAULTS = {
     'joint_map':          {},   # {joint_key: {port, invert, scale}}
     'pca_output_idx':     0,    # which output from co-other.json to drive
     'live_output':        False, # drive servos in real time when True
+    'xlights_model_name': 'DmxServo',  # xLights model name for XSQ export
 }
 
 # Normalization bounds (lo, hi) → t=0.0–1.0 across the joint's natural range
@@ -427,6 +428,7 @@ class CaptureDaemon:
                 co_other_out=self._mapper._out,
                 step_time_ms=step_ms,
                 output_path=str(xsq_path),
+                model_name=self.cfg.get('xlights_model_name', 'DmxServo'),
             )
             result['xsq_filename']  = xsq_filename
             result['fseq_filename'] = fseq_filename

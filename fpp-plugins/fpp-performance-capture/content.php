@@ -385,6 +385,19 @@ $step_time_ms = intval($cfg['step_time_ms'] ?? 50);
 <!-- ══ Settings ═════════════════════════════════════════════════════════ -->
 <div class="pc-card">
   <h3>Settings</h3>
+
+  <!-- xLights model name -->
+  <div style="margin-bottom:16px;">
+    <div style="color:var(--muted); font-size:11px; margin-bottom:4px;">
+      xLights Model Name
+      <span style="color:#444; font-size:10px; margin-left:4px;">must match the model name in your xLights show for XSQ export</span>
+    </div>
+    <div style="display:flex; align-items:center; gap:8px; max-width:320px;">
+      <input class="pc-input" id="xlights-model-name" style="flex:1;"
+             value="<?= htmlspecialchars($cfg['xlights_model_name'] ?? 'DmxServo') ?>">
+    </div>
+  </div>
+
   <div style="display:grid; grid-template-columns:1fr 1fr; gap:16px 32px; max-width:600px;">
     <div>
       <div style="color:var(--muted); font-size:11px; margin-bottom:4px;">Joint Smoothing
@@ -853,8 +866,9 @@ function saveSmoothing() {
   fetch(API + '/api/config', {
     method:'POST', headers:{'Content-Type':'application/json'},
     body: JSON.stringify({
-      smoothing:       parseFloat(document.getElementById('sl-smoothing').value),
-      servo_smoothing: parseFloat(document.getElementById('sl-servo').value),
+      smoothing:          parseFloat(document.getElementById('sl-smoothing').value),
+      servo_smoothing:    parseFloat(document.getElementById('sl-servo').value),
+      xlights_model_name: (document.getElementById('xlights-model-name').value.trim() || 'DmxServo'),
     })
   }).then(r => r.json()).then(d => {
     const el = document.getElementById('settings-msg');
