@@ -286,15 +286,25 @@ $step_time_ms = intval($cfg['step_time_ms'] ?? 50);
 
 </div><!-- /row 1 -->
 
-<!-- ══ Waveform Review ══════════════════════════════════════════════════ -->
+<!-- ══ Timeline ══════════════════════════════════════════════════════════ -->
 <div class="pc-card">
-  <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:10px; flex-wrap:wrap; gap:8px;">
-    <h3 style="margin:0;">Waveform Review</h3>
+  <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:8px; flex-wrap:wrap; gap:8px;">
+    <h3 style="margin:0;">Timeline</h3>
     <div class="wf-filter">
       <label><input type="radio" name="wf-filter" value="all" checked onchange="wfSetFilter('all')"> All</label>
       <label><input type="radio" name="wf-filter" value="servo" onchange="wfSetFilter('servo')"> Servo-mapped</label>
       <label><input type="radio" name="wf-filter" value="select" onchange="wfSetFilter('select')"> Custom</label>
     </div>
+  </div>
+  <!-- Transport controls -->
+  <div style="display:flex; gap:5px; align-items:center; flex-wrap:wrap; margin-bottom:10px;">
+    <button class="pc-btn btn-play  btn-sm" onclick="tlPlay()">▶ Play</button>
+    <button class="pc-btn btn-pause btn-sm" onclick="tlPause()">⏸ Pause</button>
+    <button class="pc-btn btn-halt  btn-sm" onclick="tlStop()">■ Stop</button>
+    <button class="pc-btn btn-ghost btn-sm" onclick="tlRestart()">⏮ Restart</button>
+    <button class="pc-btn btn-ghost btn-sm" id="btn-tl-half" onclick="tlToggleSpeed()">½×</button>
+    <button class="pc-btn btn-ghost btn-sm" id="btn-tl-loop" onclick="tlToggleLoop()">↻ Loop</button>
+    <span id="tl-status" style="color:var(--muted); font-size:11px; font-family:monospace; margin-left:4px;"></span>
   </div>
   <!-- Custom channel checkboxes (shown in Custom mode) -->
   <div id="wf-custom-checks" style="display:flex;">
@@ -872,11 +882,47 @@ function saveSmoothing() {
   });
 }
 
+// ── Timeline transport ────────────────────────────────────────────────────
+
+const TL = { speed: 1.0, loop: false };
+
+function tlPbStart(frame) {
+  fetch(API+'/api/playback/start', {
+    method:'POST', headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({frame, speed: TL.speed, loop: TL.loop})
+  }).then(pollStatus);
+}
+function tlPlay()    { tlPbStart(WF.cursor || 0); }
+function tlPause()   { fetch(API+'/api/playback/pause',{method:'POST'}).then(pollStatus); }
+function tlStop()    { fetch(API+'/api/playback/stop', {method:'POST'}).then(pollStatus); }
+function tlRestart() { tlPbStart(0); }
+
+function tlToggleSpeed() {
+  TL.speed = TL.speed === 1.0 ? 0.5 : 1.0;
+  _updateTlButtons();
+}
+function tlToggleLoop() {
+  TL.loop = !TL.loop;
+  _updateTlButtons();
+}
+function _updateTlButtons() {
+  const hBtn = document.getElementById('btn-tl-half');
+  const lBtn = document.getElementById('btn-tl-loop');
+  if (hBtn) {
+    hBtn.className   = 'pc-btn btn-sm ' + (TL.speed !== 1.0 ? 'btn-pause' : 'btn-ghost');
+    hBtn.textContent = TL.speed !== 1.0 ? '½× ON' : '½×';
+  }
+  if (lBtn) {
+    lBtn.className   = 'pc-btn btn-sm ' + (TL.loop ? 'btn-play' : 'btn-ghost');
+    lBtn.textContent = TL.loop ? '↻ Loop ON' : '↻ Loop';
+  }
+}
+
 // ── Recording / Playback ──────────────────────────────────────────────────
 
 function recStart() { fetch(API+'/api/record/start',  {method:'POST'}).then(pollStatus); }
 function recStop()  { fetch(API+'/api/record/stop',   {method:'POST'}).then(() => { pollStatus(); WF.load(); }); }
-function pbStart()  { fetch(API+'/api/playback/start',{method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({frame: WF.cursor||0})}).then(pollStatus); }
+function pbStart()  { tlPbStart(WF.cursor || 0); }
 function pbPause()  { fetch(API+'/api/playback/pause',{method:'POST'}).then(pollStatus); }
 function pbStop()   { fetch(API+'/api/playback/stop', {method:'POST'}).then(pollStatus); }
 
@@ -1020,6 +1066,17 @@ function pollStatus() {
       updateScrubSlider(s.pb_pos);
       WF.cursor = s.pb_pos;
       WF.draw();
+    }
+
+    // Sync Timeline button states and speed/loop from server
+    if (s.pb_speed !== undefined) {
+      TL.speed = s.pb_speed;
+      TL.loop  = !!s.pb_loop;
+      _updateTlButtons();
+      const badge = document.getElementById('tl-status');
+      if (badge) badge.textContent = s.playing
+        ? (TL.speed !== 1.0 ? `${TL.speed}×` : '') + (TL.loop ? '  ↻' : '')
+        : '';
     }
 
     // Session info bar

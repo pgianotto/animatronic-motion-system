@@ -271,6 +271,8 @@ class CaptureDaemon:
         self._pb_pause   = threading.Event()
         self._pb_playing = False
         self._pb_pos     = 0
+        self._pb_speed   = 1.0
+        self._pb_loop    = False
 
         self._start_components()
         self._start_camera_thread()
@@ -342,11 +344,14 @@ class CaptureDaemon:
 
     # ── Playback ─────────────────────────────────────────────────────────────
 
-    def start_playback(self, start_idx: int = 0) -> bool:
+    def start_playback(self, start_idx: int = 0,
+                       speed: float = 1.0, loop: bool = False) -> bool:
         frames = self._capture.get_frames()
         if not frames:
             return False
-        start_idx = max(0, min(start_idx, len(frames) - 1))
+        start_idx        = max(0, min(start_idx, len(frames) - 1))
+        self._pb_speed   = max(0.1, float(speed))
+        self._pb_loop    = bool(loop)
         if self._pb_thread and self._pb_thread.is_alive():
             self._pb_stop.set()
             self._pb_pause.clear()
@@ -355,7 +360,9 @@ class CaptureDaemon:
         self._pb_playing = True
         self._pb_pos     = start_idx
         self._pb_thread  = threading.Thread(
-            target=self._playback_loop, args=(frames, start_idx), daemon=True)
+            target=self._playback_loop,
+            args=(frames, start_idx, self._pb_speed, self._pb_loop),
+            daemon=True)
         self._pb_thread.start()
         return True
 
@@ -370,36 +377,42 @@ class CaptureDaemon:
         self._pb_pause.clear()
         self._pb_playing = False
 
-    def _playback_loop(self, frames, start_idx: int = 0):
-        wall_start  = time.time() - frames[start_idx].timestamp
-        pause_since = None
-        total       = len(frames)
-        for i in range(start_idx, total):
-            frame = frames[i]
-            if self._pb_stop.is_set():
+    def _playback_loop(self, frames, start_idx: int = 0,
+                       speed: float = 1.0, loop: bool = False):
+        cur_idx = start_idx
+        while True:
+            wall_start  = time.time() - frames[cur_idx].timestamp / speed
+            pause_since = None
+            total       = len(frames)
+            for i in range(cur_idx, total):
+                frame = frames[i]
+                if self._pb_stop.is_set():
+                    break
+                while self._pb_pause.is_set() and not self._pb_stop.is_set():
+                    if pause_since is None:
+                        pause_since = time.time()
+                    time.sleep(0.02)
+                if pause_since is not None:
+                    wall_start += time.time() - pause_since
+                    pause_since = None
+                if self._pb_stop.is_set():
+                    break
+                target = wall_start + frame.timestamp / speed
+                wait   = target - time.time()
+                if wait > 0:
+                    time.sleep(wait)
+                if self._pb_stop.is_set():
+                    break
+                self._capture.play_frame(frame.values)
+                self._pb_pos = i
+                cmds = self._mapper.compute(frame.values)
+                if cmds:
+                    cmds = self._smooth_servos(cmds)
+                    if self._writer:
+                        self._writer.set_channels(cmds)
+            if self._pb_stop.is_set() or not loop:
                 break
-            while self._pb_pause.is_set() and not self._pb_stop.is_set():
-                if pause_since is None:
-                    pause_since = time.time()
-                time.sleep(0.02)
-            if pause_since is not None:
-                wall_start += time.time() - pause_since
-                pause_since = None
-            if self._pb_stop.is_set():
-                break
-            target = wall_start + frame.timestamp
-            wait = target - time.time()
-            if wait > 0:
-                time.sleep(wait)
-            if self._pb_stop.is_set():
-                break
-            self._capture.play_frame(frame.values)
-            self._pb_pos = i
-            cmds = self._mapper.compute(frame.values)
-            if cmds:
-                cmds = self._smooth_servos(cmds)
-                if self._writer:
-                    self._writer.set_channels(cmds)
+            cur_idx = 0   # loop: restart from the beginning
         self._pb_playing = False
         self._pb_stop.clear()
 
@@ -506,6 +519,8 @@ class CaptureDaemon:
             'session_name': self._session_name,
             'pb_pos':       self._pb_pos,
             'pb_timestamp': round(pb_ts, 2),
+            'pb_speed':     self._pb_speed,
+            'pb_loop':      self._pb_loop,
             'values':       {k: round(v, 3) for k, v in self._values.items()},
             'joint_map':    self.cfg.get('joint_map', {}),
             'ports':        self._mapper.port_info(),
@@ -592,7 +607,9 @@ def api_pb_seek():
 def api_pb_start():
     data      = request.get_json(force=True, silent=True) or {}
     start_idx = int(data.get('frame', 0))
-    ok = daemon.start_playback(start_idx)
+    speed     = float(data.get('speed', daemon._pb_speed))
+    loop      = bool(data.get('loop',  daemon._pb_loop))
+    ok = daemon.start_playback(start_idx, speed=speed, loop=loop)
     return jsonify({'ok': ok})
 
 @app.route('/api/playback/pause', methods=['POST'])
