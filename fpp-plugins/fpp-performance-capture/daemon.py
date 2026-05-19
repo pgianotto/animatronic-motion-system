@@ -89,15 +89,12 @@ def _set_fpp_pca9685_output(enabled: bool):
                 changed = True
         if not changed:
             return
-        if not enabled:
-            data = json.dumps(cfg).encode()
-            req  = urllib.request.Request(CO_OTHER_API, data=data, method='POST',
-                                          headers={'Content-Type': 'application/json'})
-            urllib.request.urlopen(req, timeout=3)
-            print('[Capture] FPP PCA9685 output disabled.')
-        else:
-            CO_OTHER_PATH.write_text(json.dumps(cfg, indent=2))
-            print('[Capture] FPP PCA9685 re-enabled in config (takes effect on next fppd restart).')
+        data = json.dumps(cfg).encode()
+        req  = urllib.request.Request(CO_OTHER_API, data=data, method='POST',
+                                      headers={'Content-Type': 'application/json'})
+        urllib.request.urlopen(req, timeout=3)
+        state = 'disabled' if not enabled else 're-enabled'
+        print(f'[Capture] FPP PCA9685 output {state}.')
     except Exception as exc:
         print(f'[Capture] Could not toggle FPP PCA9685 output: {exc}')
 
