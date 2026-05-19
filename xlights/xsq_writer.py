@@ -1,16 +1,14 @@
-"""Generate an xLights XSQ sequence file with per-frame Servo effects.
+"""Generate an xLights XSQ sequence file with one Servo effect per joint.
 
-Each joint mapping row carries an xlights_model name. Ports that share the
-same model name are grouped into one Element with one EffectLayer per port
-(Servo1, Servo2, … in port-index order). Different model names produce
-separate Elements, so a multi-model rig (e.g. Mickey.Arm + Mickey.Head)
-exports correctly in a single XSQ.
+Each effect spans the full sequence duration and carries a custom value curve
+built from the captured per-frame data, so xLights sees a single editable
+effect rather than one effect per frame.
 
-Effect settings are stored in the EffectDB (deduplicated by value+channel)
-and referenced by index from ElementEffects, matching the format xLights
-itself produces.
+Joints that share the same xlights_model are grouped into one Element with one
+EffectLayer per port (Servo1, Servo2, … in port-index order).
 """
 
+from collections import defaultdict
 from pathlib import Path
 
 from xlights.fseq_writer import NORM_RANGE, _interp
@@ -28,14 +26,39 @@ _PALETTE = (
     "C_CHECKBOX_Palette8=0,C_SLIDER_SparkleFrequency=0"
 )
 
+_MAX_CURVE_POINTS = 200
 
-def _servo_settings(pct: float, servo_num: int) -> str:
+
+def _value_curve(pcts: list) -> str:
+    """Build an xLights custom value curve string from per-frame percentages."""
+    n = len(pcts)
+    if n == 0:
+        return "Active=FALSE|Id=ID_VALUECURVE_Servo|Type=Flat|Min=0.00|Max=100.00|"
+    if n == 1:
+        return (f"Active=TRUE|Id=ID_VALUECURVE_Servo|Type=Flat"
+                f"|Min=0.00|Max=100.00|")
+
+    # Downsample while preserving first and last points
+    if n > _MAX_CURVE_POINTS:
+        step = (n - 1) / (_MAX_CURVE_POINTS - 1)
+        indices = sorted({round(i * step) for i in range(_MAX_CURVE_POINTS)})
+        indices[0] = 0
+        indices[-1] = n - 1
+    else:
+        indices = list(range(n))
+
+    total = len(indices) - 1
+    pts = [f"{i / total:.4f}:{pcts[idx]:.2f}" for i, idx in enumerate(indices)]
+    return (f"Active=TRUE|Id=ID_VALUECURVE_Servo|Type=Custom"
+            f"|Min=0.00|Max=100.00|Values={','.join(pts)}|")
+
+
+def _servo_settings(servo_num: int, vc: str) -> str:
     return (
-        f"E_CHECKBOX_16bit=1,E_CHECKBOX_Timing_Track=0,"
+        f"E_CHECKBOX_16bit=0,E_CHECKBOX_Timing_Track=0,"
         f"E_CHOICE_Channel=Servo{servo_num},"
-        f"E_TEXTCTRL_EndValue={pct:.1f},"
-        f"E_TEXTCTRL_Servo={pct:.1f},"
-        f"E_TOGGLEBUTTON_End=0,E_TOGGLEBUTTON_Start=0,"
+        f"E_TEXTCTRL_Servo=0.0,"
+        f"E_VALUECURVE_Servo={vc},"
         f"T_CHECKBOX_Canvas=0,T_CHECKBOX_LayerMorph=0,"
         f"T_CHOICE_LayerMethod=Normal,T_SLIDER_EffectLayerMix=0"
     )
@@ -77,15 +100,9 @@ def export_xsq(
     co_other_out: dict,
     step_time_ms: int,
     output_path: str,
-    model_name: str = "DmxServo",   # fallback only; per-joint xlights_model takes priority
+    model_name: str = "DmxServo",
 ) -> str:
-    """Write an xLights 2026-format XSQ with Servo effects per mapped port.
-
-    Joints that share the same xlights_model value are grouped into one
-    Element. Each port within a model becomes a separate EffectLayer, numbered
-    Servo1, Servo2, … in ascending port-index order. Joints with no
-    xlights_model set fall back to the model_name parameter.
-    """
+    """Write an xLights 2026-format XSQ with one Servo+value-curve effect per joint."""
     ports   = co_other_out.get('ports', []) if co_other_out else []
     n_ports = len(ports)
 
@@ -93,9 +110,10 @@ def export_xsq(
     total_ms   = timestamps[-1] * 1000.0 if timestamps else 0
     num_frames = max(1, int(total_ms / step_time_ms))
     duration_s = num_frames * step_time_ms / 1000.0
+    end_time   = num_frames * step_time_ms
 
-    # Deduplicate by port index — first joint alphabetically wins per port
-    port_joint = {}   # port_idx -> (joint_key, mapping)
+    # Deduplicate by port — first joint alphabetically wins per port
+    port_joint = {}
     for joint_key, mapping in joint_map.items():
         idx = int(mapping.get('port', -1))
         if idx < 0 or idx >= n_ports:
@@ -103,18 +121,16 @@ def export_xsq(
         if idx not in port_joint or joint_key < port_joint[idx][0]:
             port_joint[idx] = (joint_key, mapping)
 
-    # Group ports by xLights model name, preserving port-index order per model
-    from collections import defaultdict
-    model_ports = defaultdict(list)   # model_name -> sorted list of port_idx
+    # Group ports by xLights model name
+    model_ports = defaultdict(list)
     for port_idx in sorted(port_joint.keys()):
         joint_key, mapping = port_joint[port_idx]
         mdl = (mapping.get('xlights_model') or '').strip() or model_name
         model_ports[mdl].append(port_idx)
 
-    # Build EffectDB and per-layer refs across all models
-    db_lookup = {}   # settings_str -> index
+    # One EffectDB entry per layer (value curve embeds all frame data)
+    db_lookup = {}
     db_list   = []
-    # model_layers[model] = list of (servo_num, desc, refs)
     model_layers = {}
     for mdl, port_list in model_ports.items():
         layers = []
@@ -126,22 +142,21 @@ def export_xsq(
             )
             if frame_pcts is None:
                 continue
-            refs = []
-            for pct in frame_pcts:
-                s = _servo_settings(pct, servo_num)
-                if s not in db_lookup:
-                    db_lookup[s] = len(db_list)
-                    db_list.append(s)
-                refs.append(db_lookup[s])
+            vc  = _value_curve(frame_pcts)
+            s   = _servo_settings(servo_num, vc)
+            if s not in db_lookup:
+                db_lookup[s] = len(db_list)
+                db_list.append(s)
+            ref  = db_lookup[s]
             desc = ports[port_idx].get('description', f'Port {port_idx}')
-            layers.append((servo_num, desc, refs))
+            layers.append((servo_num, desc, ref))
         model_layers[mdl] = layers
 
     lines = [
         '<?xml version="1.0"?>',
         '<xsequence BaseChannel="0" ChanCtrlBasic="0" ChanCtrlColor="0" FixedPointTiming="1" ModelBlending="true">',
         '  <head>',
-        '    <version>2026.07</version>',
+        '    <version>2026.08</version>',
         '    <author></author>',
         '    <author-email></author-email>',
         '    <author-website></author-website>',
@@ -178,14 +193,12 @@ def export_xsq(
 
     for mdl, layers in model_layers.items():
         lines.append(f'    <Element type="model" name="{mdl}">')
-        for servo_num, desc, refs in layers:
+        for servo_num, desc, ref in layers:
             lines.append(f'      <EffectLayer><!-- Servo{servo_num}: {desc} -->')
-            for i, ref in enumerate(refs):
-                t0 = i * step_time_ms
-                t1 = t0 + step_time_ms
-                lines.append(
-                    f'        <Effect ref="{ref}" name="Servo" startTime="{t0}" endTime="{t1}" palette="0" />'
-                )
+            lines.append(
+                f'        <Effect ref="{ref}" name="Servo"'
+                f' startTime="0" endTime="{end_time}" palette="0" />'
+            )
             lines.append('      </EffectLayer>')
         lines.append('    </Element>')
 
