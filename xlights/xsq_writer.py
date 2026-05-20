@@ -48,7 +48,7 @@ def _value_curve(pcts: list) -> str:
         indices = list(range(n))
 
     total = len(indices) - 1
-    pts = [f"{i / total:.4f}:{pcts[idx]:.4f}" for i, idx in enumerate(indices)]
+    pts = [f"{i / total:.4f}:{pcts[idx] / 100.0:.4f}" for i, idx in enumerate(indices)]
     return (f"Active=TRUE|Id=ID_VALUECURVE_Servo|Type=Custom"
             f"|Min=0.00|Max=100.00|Values={';'.join(pts)}|")
 
