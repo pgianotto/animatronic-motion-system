@@ -79,6 +79,12 @@ NORM_RANGE = {
 
 
 def _set_fpp_pca9685_output(enabled: bool):
+    """Disable (via API) or re-enable (via file write) fppd's PCA9685 output.
+
+    POSTing the re-enable via the API causes fppd to enter a crash/restart loop
+    because it tries to re-initialize the chip while we still hold the I2C bus.
+    Writing the file only means fppd picks it up on its next clean restart.
+    """
     try:
         with urllib.request.urlopen(CO_OTHER_API, timeout=3) as resp:
             cfg = json.loads(resp.read())
@@ -89,12 +95,15 @@ def _set_fpp_pca9685_output(enabled: bool):
                 changed = True
         if not changed:
             return
-        data = json.dumps(cfg).encode()
-        req  = urllib.request.Request(CO_OTHER_API, data=data, method='POST',
-                                      headers={'Content-Type': 'application/json'})
-        urllib.request.urlopen(req, timeout=3)
-        state = 'disabled' if not enabled else 're-enabled'
-        print(f'[Capture] FPP PCA9685 output {state}.')
+        if not enabled:
+            data = json.dumps(cfg).encode()
+            req  = urllib.request.Request(CO_OTHER_API, data=data, method='POST',
+                                          headers={'Content-Type': 'application/json'})
+            urllib.request.urlopen(req, timeout=3)
+            print('[Capture] FPP PCA9685 output disabled.')
+        else:
+            CO_OTHER_PATH.write_text(json.dumps(cfg, indent=2))
+            print('[Capture] FPP PCA9685 re-enabled in config (takes effect on next fppd restart).')
     except Exception as exc:
         print(f'[Capture] Could not toggle FPP PCA9685 output: {exc}')
 
