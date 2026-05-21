@@ -230,53 +230,48 @@ $step_time_ms = intval($cfg['step_time_ms'] ?? 50);
 
 <!-- ══ Session ═══════════════════════════════════════════════════════════════ -->
 <div class="pc-card">
-  <div style="display:flex; gap:20px; align-items:center; flex-wrap:wrap;">
+
+  <!-- Top row: status + save (post-recording actions) -->
+  <div style="display:flex; gap:16px; align-items:flex-start; flex-wrap:wrap; margin-bottom:12px;">
 
     <!-- Status -->
-    <div style="flex:1; min-width:200px;">
-      <div class="rp-hdr">Session</div>
-      <div id="sess-status" style="font-size:12px; font-family:monospace; color:var(--fg); line-height:1.6;">
+    <div style="flex:1; min-width:180px;">
+      <div class="rp-hdr">Current Session</div>
+      <div id="sess-status" style="font-size:12px; font-family:monospace; color:var(--fg); line-height:1.8;">
         <?php if ($session_name): ?>
           <span style="color:var(--cyan);"><?= htmlspecialchars($session_name) ?></span>
           &nbsp;·&nbsp; <span id="sess-frames" style="color:var(--muted);"><?= $fc ?> frames</span>
           &nbsp;·&nbsp; <span id="sess-dur" style="color:var(--muted);"><?= $dur ?></span>
         <?php else: ?>
-          <span style="color:#444;">No session — record or load one</span>
+          <span style="color:#444;">No session — record above or load below</span>
         <?php endif; ?>
       </div>
     </div>
 
-    <!-- Divider -->
-    <div style="width:1px; height:40px; background:var(--div); flex-shrink:0;"></div>
-
-    <!-- Save -->
-    <div>
-      <div class="rp-hdr">Save As</div>
+    <!-- Save — labeled optional, auto-filled after recording -->
+    <div style="flex-shrink:0;">
+      <div class="rp-hdr">Save to File <span style="color:#444; font-size:9px; font-weight:normal; letter-spacing:0;">(optional — export works without saving)</span></div>
       <div style="display:flex; gap:6px; align-items:center;">
-        <input class="pc-input" id="sess-save-name" value="session.json" style="width:150px; font-size:11px;">
+        <input class="pc-input" id="sess-save-name" value="" placeholder="record first, then save" style="width:200px; font-size:11px;">
         <button class="pc-btn btn-ghost btn-sm" onclick="sessSave()">Save</button>
-      </div>
-    </div>
-
-    <!-- Divider -->
-    <div style="width:1px; height:40px; background:var(--div); flex-shrink:0;"></div>
-
-    <!-- Load -->
-    <div>
-      <div class="rp-hdr">Load</div>
-      <div style="display:flex; gap:6px; align-items:center;">
-        <select class="pc-select" id="sess-load-sel" style="width:160px; font-size:11px;">
-          <?php foreach ($sessions as $s): ?>
-            <option><?= htmlspecialchars($s) ?></option>
-          <?php endforeach; ?>
-        </select>
-        <button class="pc-btn btn-ghost btn-sm" onclick="sessLoad()">Load</button>
-        <button class="pc-btn btn-muted btn-sm" onclick="refreshSessions()" title="Refresh">↻</button>
       </div>
     </div>
 
     <span id="status-msg" class="pc-msg" style="margin:0; align-self:flex-end;"></span>
   </div>
+
+  <!-- Bottom row: load saved sessions (separate concern) -->
+  <div style="padding-top:10px; border-top:1px solid var(--div); display:flex; align-items:center; gap:10px; flex-wrap:wrap;">
+    <span style="color:var(--muted); font-size:10px; font-weight:bold; letter-spacing:1.5px; text-transform:uppercase; flex-shrink:0;">Load Saved</span>
+    <select class="pc-select" id="sess-load-sel" style="width:200px; font-size:11px;">
+      <?php foreach ($sessions as $s): ?>
+        <option><?= htmlspecialchars($s) ?></option>
+      <?php endforeach; ?>
+    </select>
+    <button class="pc-btn btn-ghost btn-sm" onclick="sessLoad()">Load</button>
+    <button class="pc-btn btn-muted btn-sm" onclick="refreshSessions()" title="Refresh list">↻</button>
+  </div>
+
 </div>
 
 <!-- ══ Timeline ═══════════════════════════════════════════════════════════════ -->
@@ -848,6 +843,10 @@ function recStop()  {
     pollStatus();
     WF.load();
     setStep(2);
+    const d = new Date(), pad = n => String(n).padStart(2,'0');
+    const name = `capture-${d.getFullYear()}${pad(d.getMonth()+1)}${pad(d.getDate())}-${pad(d.getHours())}${pad(d.getMinutes())}.json`;
+    const el = document.getElementById('sess-save-name');
+    if (!el.value.trim()) el.value = name;
   });
 }
 
