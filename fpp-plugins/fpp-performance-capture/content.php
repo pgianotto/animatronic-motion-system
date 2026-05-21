@@ -269,6 +269,7 @@ $step_time_ms = intval($cfg['step_time_ms'] ?? 50);
       <?php endforeach; ?>
     </select>
     <button class="pc-btn btn-ghost btn-sm" onclick="sessLoad()">Load</button>
+    <button class="pc-btn btn-halt  btn-sm" onclick="sessDelete()">Delete</button>
     <button class="pc-btn btn-muted btn-sm" onclick="refreshSessions()" title="Refresh list">↻</button>
   </div>
 
@@ -899,6 +900,23 @@ function refreshSessions() {
     const sel = document.getElementById('sess-load-sel');
     const cur = sel.value;
     sel.innerHTML = list.map(s => `<option${s===cur?' selected':''}>${s}</option>`).join('');
+  });
+}
+
+function sessDelete() {
+  const sel = document.getElementById('sess-load-sel');
+  if (!sel.value) return;
+  if (!confirm(`Delete "${sel.value}"? This cannot be undone.`)) return;
+  fetch(API+'/api/session/delete', {
+    method:'POST', headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({filename: sel.value})
+  }).then(r=>r.json()).then(d => {
+    if (d.ok) {
+      showMsg(`✓ Deleted ${sel.value}`, true);
+      refreshSessions();
+    } else {
+      showMsg('✗ ' + d.error, false);
+    }
   });
 }
 

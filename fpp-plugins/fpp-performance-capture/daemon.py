@@ -504,6 +504,18 @@ class CaptureDaemon:
         SESS_DIR.mkdir(parents=True, exist_ok=True)
         return [p.name for p in sorted(SESS_DIR.glob('*.json'))]
 
+    def delete_session(self, filename: str) -> dict:
+        path = (SESS_DIR / Path(filename).name).resolve()
+        if not str(path).startswith(str(SESS_DIR.resolve())):
+            return {'ok': False, 'error': 'Invalid path'}
+        if not path.exists():
+            return {'ok': False, 'error': 'File not found'}
+        try:
+            path.unlink()
+            return {'ok': True}
+        except Exception as exc:
+            return {'ok': False, 'error': str(exc)}
+
     def list_sequences(self) -> list:
         FSEQ_DIR.mkdir(parents=True, exist_ok=True)
         return [p.name for p in sorted(FSEQ_DIR.glob('*.fseq'))]
@@ -672,6 +684,12 @@ def api_sess_load():
 @app.route('/api/sessions')
 def api_sessions():
     return jsonify(daemon.list_sessions())
+
+@app.route('/api/session/delete', methods=['POST'])
+def api_sess_delete():
+    data     = request.get_json(force=True, silent=True) or {}
+    filename = data.get('filename', '')
+    return jsonify(daemon.delete_session(filename))
 
 @app.route('/api/sequences')
 def api_sequences():
