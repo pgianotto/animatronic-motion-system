@@ -7,6 +7,7 @@ into FPP's sequences folder so files appear in FPP's scheduler immediately.
 import json
 import os
 import signal
+import subprocess
 import sys
 import threading
 import time
@@ -35,6 +36,7 @@ CO_OTHER_PATH = Path('/home/fpp/media/config/co-other.json')
 CO_OTHER_API  = 'http://localhost/api/channel/output/co-other'
 FSEQ_DIR  = Path('/home/fpp/media/sequences')
 SESS_DIR  = Path('/home/fpp/media/animations')
+MEDIA_DIR = Path('/home/fpp/media/music')
 PORT      = 5002
 
 DEFAULTS = {
@@ -279,6 +281,7 @@ class CaptureDaemon:
         self._pb_pos     = 0
         self._pb_speed   = 1.0
         self._pb_loop    = False
+        self._audio_proc: subprocess.Popen = None
 
         self._start_components()
         self._start_camera_thread()
@@ -340,13 +343,63 @@ class CaptureDaemon:
             with self._frame_lock:
                 self._latest_jpg = buf.tobytes()
 
+    # ── Audio ────────────────────────────────────────────────────────────────
+
+    def _play_audio(self, filename: str, offset_s: float = 0.0):
+        self._stop_audio()
+        if not filename:
+            return
+        path = MEDIA_DIR / Path(filename).name
+        if not path.exists():
+            return
+        cmd = ['ffplay', '-nodisp', '-autoexit', '-loglevel', 'quiet']
+        if offset_s > 0.05:
+            cmd += ['-ss', f'{offset_s:.3f}']
+        cmd.append(str(path))
+        try:
+            self._audio_proc = subprocess.Popen(
+                cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        except Exception:
+            self._audio_proc = None
+
+    def _stop_audio(self):
+        if self._audio_proc and self._audio_proc.poll() is None:
+            self._audio_proc.terminate()
+        self._audio_proc = None
+
+    def _pause_audio(self):
+        if self._audio_proc and self._audio_proc.poll() is None:
+            try:
+                self._audio_proc.send_signal(signal.SIGSTOP)
+            except Exception:
+                pass
+
+    def _resume_audio(self):
+        if self._audio_proc and self._audio_proc.poll() is None:
+            try:
+                self._audio_proc.send_signal(signal.SIGCONT)
+            except Exception:
+                pass
+
+    def list_media_files(self) -> list:
+        if not MEDIA_DIR.exists():
+            return []
+        exts = {'.mp3', '.wav', '.ogg', '.flac', '.m4a', '.aac'}
+        return sorted(p.name for p in MEDIA_DIR.iterdir()
+                      if p.is_file() and p.suffix.lower() in exts)
+
     # ── Recording ────────────────────────────────────────────────────────────
 
     def start_recording(self):
+        self._stop_audio()
         self._capture.start_recording()
+        audio = self.cfg.get('audio_file', '')
+        if audio:
+            self._play_audio(audio)
 
     def stop_recording(self):
         self._capture.stop_recording()
+        self._stop_audio()
 
     # ── Playback ─────────────────────────────────────────────────────────────
 
@@ -370,18 +423,25 @@ class CaptureDaemon:
             args=(frames, start_idx, self._pb_speed, self._pb_loop),
             daemon=True)
         self._pb_thread.start()
+        audio = self.cfg.get('audio_file', '')
+        if audio:
+            offset = frames[start_idx].timestamp if frames else 0.0
+            self._play_audio(audio, offset_s=offset)
         return True
 
     def pause_playback(self):
         if self._pb_pause.is_set():
             self._pb_pause.clear()
+            self._resume_audio()
         else:
             self._pb_pause.set()
+            self._pause_audio()
 
     def stop_playback(self):
         self._pb_stop.set()
         self._pb_pause.clear()
         self._pb_playing = False
+        self._stop_audio()
 
     def _playback_loop(self, frames, start_idx: int = 0,
                        speed: float = 1.0, loop: bool = False):
@@ -543,6 +603,7 @@ class CaptureDaemon:
             'joint_map':    self.cfg.get('joint_map', {}),
             'ports':        self._mapper.port_info(),
             'live_output':  self.cfg.get('live_output', False),
+            'audio_file':   self.cfg.get('audio_file', ''),
             'cam_running':  getattr(self, '_cam_running', False),
         }
 
@@ -684,6 +745,10 @@ def api_sess_load():
 @app.route('/api/sessions')
 def api_sessions():
     return jsonify(daemon.list_sessions())
+
+@app.route('/api/media/files')
+def api_media_files():
+    return jsonify(daemon.list_media_files())
 
 @app.route('/api/session/delete', methods=['POST'])
 def api_sess_delete():

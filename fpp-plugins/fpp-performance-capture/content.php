@@ -260,6 +260,16 @@ $step_time_ms = intval($cfg['step_time_ms'] ?? 50);
     <span id="status-msg" class="pc-msg" style="margin:0; align-self:flex-end;"></span>
   </div>
 
+  <!-- Audio track row -->
+  <div style="padding-top:10px; border-top:1px solid var(--div); display:flex; align-items:center; gap:10px; flex-wrap:wrap;">
+    <span style="color:var(--muted); font-size:10px; font-weight:bold; letter-spacing:1.5px; text-transform:uppercase; flex-shrink:0;">Audio Track</span>
+    <select class="pc-select" id="audio-sel" style="width:220px; font-size:11px;" onchange="setAudioFile(this.value)">
+      <option value="">— none —</option>
+    </select>
+    <button class="pc-btn btn-muted btn-sm" onclick="loadMediaFiles()" title="Refresh audio list">↻</button>
+    <span id="audio-msg" class="pc-msg" style="margin:0;"></span>
+  </div>
+
   <!-- Bottom row: load saved sessions (separate concern) -->
   <div style="padding-top:10px; border-top:1px solid var(--div); display:flex; align-items:center; gap:10px; flex-wrap:wrap;">
     <span style="color:var(--muted); font-size:10px; font-weight:bold; letter-spacing:1.5px; text-transform:uppercase; flex-shrink:0;">Load Saved</span>
@@ -903,6 +913,27 @@ function refreshSessions() {
   });
 }
 
+function loadMediaFiles() {
+  fetch(API+'/api/media/files').then(r=>r.json()).then(files => {
+    const sel = document.getElementById('audio-sel');
+    const cur = sel.value;
+    sel.innerHTML = '<option value="">— none —</option>' +
+      files.map(f => `<option value="${f}"${f===cur?' selected':''}>${f}</option>`).join('');
+  });
+}
+
+function setAudioFile(filename) {
+  fetch(API+'/api/config', {
+    method:'POST', headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({audio_file: filename})
+  }).then(r=>r.json()).then(d => {
+    const el = document.getElementById('audio-msg');
+    el.style.color = d.ok ? '#06d6a0' : '#e63946';
+    el.textContent = d.ok ? (filename ? `✓ ${filename}` : '✓ No audio') : '✗ Error';
+    setTimeout(() => el.textContent = '', 3000);
+  });
+}
+
 function sessDelete() {
   const sel = document.getElementById('sess-load-sel');
   if (!sel.value) return;
@@ -1018,6 +1049,15 @@ function pollStatus() {
       buildJointTable(s.ports, s.joint_map || {});
     }
 
+    // Sync audio dropdown to config (first poll only — user changes handled by onchange)
+    if (!pollStatus._audioSynced && s.audio_file !== undefined) {
+      const asel = document.getElementById('audio-sel');
+      if (asel && [...asel.options].some(o => o.value === s.audio_file)) {
+        asel.value = s.audio_file;
+      }
+      pollStatus._audioSynced = true;
+    }
+
     setLiveBtn(!!s.live_output);
 
     const ownerCard = document.getElementById('cam-ownership-card');
@@ -1049,6 +1089,7 @@ function restoreLiveFollow() {
 
 // ── Init ──────────────────────────────────────────────────────────────────────
 WF.load();
+loadMediaFiles();
 setInterval(pollStatus, 500);
 pollStatus();
 </script>
