@@ -30,13 +30,18 @@ _MAX_CURVE_POINTS = 200
 
 
 def _value_curve(pcts: list) -> str:
-    """Build an xLights custom value curve string from per-frame percentages."""
+    """Build an xLights custom value curve string from per-frame percentages.
+
+    xLights Servo effect uses a 0-1000 raw-value scale (RV=TRUE).
+    pcts are 0-100%, so multiply by 10 to convert to the 0-1000 range.
+    """
     n = len(pcts)
     if n == 0:
-        return "Active=FALSE|Id=ID_VALUECURVE_Servo|Type=Flat|Min=0.00|Max=100.00|"
+        return "Active=FALSE|Id=ID_VALUECURVE_Servo|Type=Flat|Min=0.00|Max=1000.00|"
     if n == 1:
-        return (f"Active=TRUE|Id=ID_VALUECURVE_Servo|Type=Flat"
-                f"|Min=0.00|Max=100.00|")
+        v = round(pcts[0] * 10.0, 2)
+        return (f"Active=TRUE|Id=ID_VALUECURVE_Servo|"
+                f"Min=0.00|Max=1000.00|P1={v:.2f}|RV=TRUE|")
 
     # Downsample while preserving first and last points
     if n > _MAX_CURVE_POINTS:
@@ -48,9 +53,9 @@ def _value_curve(pcts: list) -> str:
         indices = list(range(n))
 
     total = len(indices) - 1
-    pts = [f"{i / total:.4f}:{pcts[idx] / 10.0:.4f}" for i, idx in enumerate(indices)]
+    pts = [f"{i / total:.4f}:{pcts[idx] * 10.0:.4f}" for i, idx in enumerate(indices)]
     return (f"Active=TRUE|Id=ID_VALUECURVE_Servo|Type=Custom"
-            f"|Min=0.00|Max=100.00|Values={';'.join(pts)}|")
+            f"|Min=0.00|Max=1000.00|RV=TRUE|Values={';'.join(pts)}|")
 
 
 def _servo_settings(servo_num: int, vc: str) -> str:
