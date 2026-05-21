@@ -307,28 +307,10 @@ $step_time_ms = intval($cfg['step_time_ms'] ?? 50);
     </div>
   </div>
 
-  <!-- Edit toolbar -->
-  <div style="display:flex; gap:6px; align-items:center; flex-wrap:wrap; margin-bottom:8px;
-              padding:7px 10px; background:var(--dark); border-radius:4px;">
-    <span style="color:var(--muted); font-size:10px; font-weight:bold; letter-spacing:1px;
-                 text-transform:uppercase; margin-right:2px;">Edit</span>
+  <!-- Edit mode toggle -->
+  <div style="display:flex; gap:6px; align-items:center; flex-wrap:wrap; margin-bottom:8px;">
     <button class="pc-btn btn-ghost btn-sm" id="btn-edit-mode" onclick="toggleEditMode()">✎ Draw</button>
-    <button class="pc-btn btn-muted btn-sm" id="btn-undo" onclick="undoLastEdit()" disabled>↩ Undo</button>
-    <button class="pc-btn btn-rec   btn-sm" onclick="rerecordStart()">⏺ Re-record</button>
-    <span id="lock-status" style="color:var(--amber); font-size:11px; margin-left:4px;"></span>
-  </div>
-  <!-- Per-channel lock panel -->
-  <div style="margin-bottom:10px;">
-    <div style="color:var(--muted); font-size:10px; font-weight:bold; letter-spacing:1px;
-                text-transform:uppercase; margin-bottom:5px;">
-      Channel Locks
-      <span style="color:#444; font-weight:normal; letter-spacing:0; text-transform:none; font-size:9px; margin-left:4px;">
-        locked channels are preserved during Re-record
-      </span>
-    </div>
-    <div id="lock-panel" style="display:flex; gap:5px; flex-wrap:wrap;">
-      <span style="color:#444; font-size:11px;">Load a session to see channels</span>
-    </div>
+    <span id="lock-status" style="color:var(--amber); font-size:11px;"></span>
   </div>
 
   <!-- Scrub -->
@@ -350,6 +332,9 @@ $step_time_ms = intval($cfg['step_time_ms'] ?? 50);
     <button class="pc-btn btn-ghost btn-sm" onclick="tlRestart()">⏮ Restart</button>
     <button class="pc-btn btn-ghost btn-sm" id="btn-tl-half" onclick="tlToggleSpeed()">½×</button>
     <button class="pc-btn btn-ghost btn-sm" id="btn-tl-loop" onclick="tlToggleLoop()">↻ Loop</button>
+    <span style="color:#2a2a4a; margin:0 2px;">|</span>
+    <button class="pc-btn btn-muted btn-sm" id="btn-undo" onclick="undoLastEdit()" disabled>↩ Undo</button>
+    <button class="pc-btn btn-rec   btn-sm" onclick="rerecordStart()">⏺ Re-record</button>
     <span id="tl-status" style="color:var(--muted); font-size:11px; font-family:monospace; margin-left:4px;"></span>
   </div>
 
@@ -531,7 +516,6 @@ const WF = {
         document.getElementById('wf-msg').style.display = hasFrames ? 'none' : '';
         this.buildCustomChecks();
         this.draw();
-        buildLockPanel();
       }).catch(() => {});
   },
 
@@ -580,6 +564,11 @@ const WF = {
     ctx.fillStyle = '#080816'; ctx.fillRect(0, 0, cssW, this.RULER_H);
     ctx.strokeStyle = '#333'; ctx.lineWidth = 1;
     ctx.beginPath(); ctx.moveTo(waveX, 0); ctx.lineTo(waveX, this.RULER_H); ctx.stroke();
+    // Lock column header
+    const hx = this.LOCK_W / 2, hy = this.RULER_H / 2 + 1;
+    ctx.strokeStyle = '#3a3a5a'; ctx.lineWidth = 1.2;
+    ctx.strokeRect(hx - 4, hy - 2, 8, 6);
+    ctx.beginPath(); ctx.arc(hx, hy - 2, 2.5, Math.PI, 0); ctx.stroke();
 
     const tick = [0.1,0.5,1,2,5,10,30,60].find(m => dur/m <= 14) || 60;
     ctx.fillStyle = '#666'; ctx.font = '9px monospace'; ctx.textAlign = 'center';
@@ -744,7 +733,6 @@ function wfSetFilter(mode) {
   if (mode === 'servo') WF.checked = Object.fromEntries(JOINTS.map(j => [j.key, (WF.data?.servo_mapped||[]).includes(j.key)]));
   WF.buildCustomChecks();
   WF.draw();
-  buildLockPanel();
 }
 
 // ── Editor: lock, draw-edit, re-record ───────────────────────────────────────
@@ -795,29 +783,11 @@ function undoLastEdit() {
   patchChannel(entry.channel, entry.edits);
 }
 
-function buildLockPanel() {
-  const panel = document.getElementById('lock-panel');
-  if (!panel) return;
-  const available = (WF.data && WF.data.data)
-    ? JOINTS.filter(j => WF.data.data[j.key] !== undefined)
-    : [];
-  if (!available.length) {
-    panel.innerHTML = '<span style="color:#444; font-size:11px;">Load a session to see channels</span>';
-    return;
-  }
-  panel.innerHTML = available.map(j => {
-    const on = !!_locked[j.key];
-    return `<button class="pc-btn btn-sm ${on ? 'btn-pause' : 'btn-muted'}"
-      style="font-size:10px; padding:3px 8px;" onclick="toggleChannelLock('${j.key}')">${j.label}</button>`;
-  }).join('');
-}
-
 function toggleChannelLock(key) {
   _locked[key] = !_locked[key];
   const n = Object.values(_locked).filter(Boolean).length;
   const el = document.getElementById('lock-status');
   if (el) el.textContent = n > 0 ? `${n} locked` : '';
-  buildLockPanel();
   WF.draw();
 }
 
