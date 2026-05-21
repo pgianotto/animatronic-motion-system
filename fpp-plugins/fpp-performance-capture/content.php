@@ -134,9 +134,25 @@ $step_time_ms = intval($cfg['step_time_ms'] ?? 50);
 .pc-step.active .sn { border-color:var(--cyan); background:var(--cyan); color:#000; }
 .pc-step.done       { color:#2a4a3a; }
 .pc-step.done .sn   { border-color:#2a4a3a; background:#2a4a3a; color:#06d6a0; }
+
+.pc-tabs  { display:flex; gap:0; margin-bottom:16px; border-bottom:2px solid var(--div); }
+.pc-tab   { padding:9px 22px; cursor:pointer; font-size:12px; font-weight:bold;
+            letter-spacing:0.8px; text-transform:uppercase; color:var(--muted);
+            border-bottom:2px solid transparent; margin-bottom:-2px; }
+.pc-tab:hover  { color:var(--fg); }
+.pc-tab.active { color:var(--cyan); border-bottom-color:var(--cyan); }
+.pc-tabpanel   { display:none; }
+.pc-tabpanel.active { display:block; }
 </style>
 
 <div class="pc-wrap">
+
+<div class="pc-tabs">
+  <div class="pc-tab active" data-tab="capture" onclick="switchTab('capture')">Record &amp; Review</div>
+  <div class="pc-tab"        data-tab="joints"  onclick="switchTab('joints')">Map Joints</div>
+</div>
+
+<div class="pc-tabpanel active" id="tab-capture">
 
 <!-- ══ Process bar ══════════════════════════════════════════════════════════ -->
 <div class="pc-steps" id="pc-steps">
@@ -343,6 +359,10 @@ $step_time_ms = intval($cfg['step_time_ms'] ?? 50);
   <div id="wf-msg">Load or record a session to see the waveform.</div>
 </div>
 
+</div><!-- /tab-capture -->
+
+<div class="pc-tabpanel" id="tab-joints">
+
 <!-- ══ Joint Mapping ══════════════════════════════════════════════════════════ -->
 <div class="pc-card">
   <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:6px;">
@@ -450,6 +470,8 @@ $step_time_ms = intval($cfg['step_time_ms'] ?? 50);
   </div>
 </div>
 
+</div><!-- /tab-joints -->
+
 </div><!-- .pc-wrap -->
 
 <script>
@@ -480,6 +502,14 @@ const JOINTS = [
 let JM_ports = [];
 let JM_built  = false;
 
+// ── Tab switching ─────────────────────────────────────────────────────────────
+function switchTab(name) {
+  document.querySelectorAll('.pc-tab').forEach(t =>
+    t.classList.toggle('active', t.dataset.tab === name));
+  document.querySelectorAll('.pc-tabpanel').forEach(p =>
+    p.classList.toggle('active', p.id === 'tab-' + name));
+}
+
 // ── Process step highlight ────────────────────────────────────────────────────
 function setStep(n) {
   [1,2,3,4].forEach(i => {
@@ -487,6 +517,7 @@ function setStep(n) {
     if (!el) return;
     el.className = 'pc-step' + (i === n ? ' active' : i < n ? ' done' : '');
   });
+  if (n === 3) switchTab('joints');
 }
 
 // ── Waveform ──────────────────────────────────────────────────────────────────
