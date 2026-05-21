@@ -55,9 +55,12 @@ def _value_curve(pcts: list) -> str:
 
 def _servo_settings(servo_num: int, vc: str) -> str:
     return (
-        f"E_CHECKBOX_16bit=0,E_CHECKBOX_Timing_Track=0,"
+        f"E_CHECKBOX_16bit=1,E_CHECKBOX_Timing_Track=0,"
         f"E_CHOICE_Channel=Servo{servo_num},"
+        f"E_TEXTCTRL_EndValue=0.0,"
         f"E_TEXTCTRL_Servo=0.0,"
+        f"E_TOGGLEBUTTON_End=0,"
+        f"E_TOGGLEBUTTON_Start=1,"
         f"E_VALUECURVE_Servo={vc},"
         f"T_CHECKBOX_Canvas=0,T_CHECKBOX_LayerMorph=0,"
         f"T_CHOICE_LayerMethod=Normal,T_SLIDER_EffectLayerMix=0"
