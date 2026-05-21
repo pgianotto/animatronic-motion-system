@@ -308,16 +308,27 @@ $step_time_ms = intval($cfg['step_time_ms'] ?? 50);
   </div>
 
   <!-- Edit toolbar -->
-  <div style="display:flex; gap:6px; align-items:center; flex-wrap:wrap; margin-bottom:10px;
+  <div style="display:flex; gap:6px; align-items:center; flex-wrap:wrap; margin-bottom:8px;
               padding:7px 10px; background:var(--dark); border-radius:4px;">
     <span style="color:var(--muted); font-size:10px; font-weight:bold; letter-spacing:1px;
                  text-transform:uppercase; margin-right:2px;">Edit</span>
     <button class="pc-btn btn-ghost btn-sm" id="btn-edit-mode" onclick="toggleEditMode()">✎ Draw</button>
+    <button class="pc-btn btn-muted btn-sm" id="btn-undo" onclick="undoLastEdit()" disabled>↩ Undo</button>
     <button class="pc-btn btn-rec   btn-sm" onclick="rerecordStart()">⏺ Re-record</button>
     <span id="lock-status" style="color:var(--amber); font-size:11px; margin-left:4px;"></span>
-    <span style="color:#333; font-size:11px; margin-left:auto;">
-      Click lock icon per channel · drag in Draw mode to edit values
-    </span>
+  </div>
+  <!-- Per-channel lock panel -->
+  <div style="margin-bottom:10px;">
+    <div style="color:var(--muted); font-size:10px; font-weight:bold; letter-spacing:1px;
+                text-transform:uppercase; margin-bottom:5px;">
+      Channel Locks
+      <span style="color:#444; font-weight:normal; letter-spacing:0; text-transform:none; font-size:9px; margin-left:4px;">
+        locked channels are preserved during Re-record
+      </span>
+    </div>
+    <div id="lock-panel" style="display:flex; gap:5px; flex-wrap:wrap;">
+      <span style="color:#444; font-size:11px;">Load a session to see channels</span>
+    </div>
   </div>
 
   <!-- Scrub -->
@@ -500,7 +511,7 @@ const WF = {
   cursor: 0, dragging: false,
   LOCK_W:22, LABEL_W:110, VAL_W:50, ROW_H:28, RULER_H:18, PAD:4,
   FACE_COL:'#4cc9f0', BODY_COL:'#fb8500',
-  editMode: false, _drawing: false, _drawChannel: null, _drawEdits: [],
+  editMode: false, _drawing: false, _drawChannel: null, _drawEdits: [], _drawSnapshot: null,
 
   visible() {
     if (!this.data) return [];
@@ -520,6 +531,7 @@ const WF = {
         document.getElementById('wf-msg').style.display = hasFrames ? 'none' : '';
         this.buildCustomChecks();
         this.draw();
+        buildLockPanel();
       }).catch(() => {});
   },
 
@@ -686,6 +698,11 @@ const WF = {
     if (_locked[j.key]) return;
     if (this._drawChannel && this._drawChannel !== j.key) return;
     this._drawChannel = j.key;
+    // Capture pre-draw snapshot once so we can build the undo entry later
+    if (!this._drawSnapshot) {
+      const v0 = this.data.data[j.key];
+      if (v0) this._drawSnapshot = {key: j.key, vals: [...v0]};
+    }
     const waveX  = this.LOCK_W + this.LABEL_W;
     const waveW  = Math.max(canvas.offsetWidth - waveX - this.VAL_W, 1);
     const frac   = Math.max(0, Math.min(1, (x - waveX) / waveW));
@@ -727,16 +744,11 @@ function wfSetFilter(mode) {
   if (mode === 'servo') WF.checked = Object.fromEntries(JOINTS.map(j => [j.key, (WF.data?.servo_mapped||[]).includes(j.key)]));
   WF.buildCustomChecks();
   WF.draw();
+  buildLockPanel();
 }
 
 // ── Editor: lock, draw-edit, re-record ───────────────────────────────────────
 const _locked = {};
-
-function updateLockStatus() {
-  const n = Object.values(_locked).filter(Boolean).length;
-  const el = document.getElementById('lock-status');
-  if (el) el.textContent = n > 0 ? `${n} locked` : '';
-}
 
 function toggleEditMode() {
   WF.editMode = !WF.editMode;
@@ -771,6 +783,44 @@ function rerecordStart() {
   });
 }
 
+const _undoStack = [];
+function updateUndoBtn() {
+  const btn = document.getElementById('btn-undo');
+  if (btn) btn.disabled = !_undoStack.length;
+}
+function undoLastEdit() {
+  if (!_undoStack.length) return;
+  const entry = _undoStack.pop();
+  updateUndoBtn();
+  patchChannel(entry.channel, entry.edits);
+}
+
+function buildLockPanel() {
+  const panel = document.getElementById('lock-panel');
+  if (!panel) return;
+  const available = (WF.data && WF.data.data)
+    ? JOINTS.filter(j => WF.data.data[j.key] !== undefined)
+    : [];
+  if (!available.length) {
+    panel.innerHTML = '<span style="color:#444; font-size:11px;">Load a session to see channels</span>';
+    return;
+  }
+  panel.innerHTML = available.map(j => {
+    const on = !!_locked[j.key];
+    return `<button class="pc-btn btn-sm ${on ? 'btn-pause' : 'btn-muted'}"
+      style="font-size:10px; padding:3px 8px;" onclick="toggleChannelLock('${j.key}')">${j.label}</button>`;
+  }).join('');
+}
+
+function toggleChannelLock(key) {
+  _locked[key] = !_locked[key];
+  const n = Object.values(_locked).filter(Boolean).length;
+  const el = document.getElementById('lock-status');
+  if (el) el.textContent = n > 0 ? `${n} locked` : '';
+  buildLockPanel();
+  WF.draw();
+}
+
 (function() {
   const canvas = document.getElementById('wf-canvas');
   canvas.addEventListener('mousedown', e => {
@@ -780,10 +830,7 @@ function rerecordStart() {
       const rowIdx = Math.floor((y - WF.RULER_H) / WF.ROW_H);
       const vis = WF.visible();
       if (rowIdx >= 0 && rowIdx < vis.length) {
-        const key = vis[rowIdx].key;
-        _locked[key] = !_locked[key];
-        updateLockStatus();
-        WF.draw();
+        toggleChannelLock(vis[rowIdx].key);
       }
       return;
     }
@@ -800,8 +847,24 @@ function rerecordStart() {
     if (WF.dragging) WF.seek(e.offsetX);
   });
   function commitDraw() {
-    if (WF._drawing && WF._drawEdits.length > 0) patchChannel(WF._drawChannel, [...WF._drawEdits]);
-    WF._drawing = false; WF._drawEdits = []; WF._drawChannel = null; WF.dragging = false;
+    if (WF._drawing && WF._drawEdits.length > 0 && WF._drawChannel) {
+      const ch   = WF._drawChannel;
+      const snap = WF._drawSnapshot;
+      // Build undo entry: original values over the drawn frame range
+      if (snap && snap.key === ch && WF.data) {
+        const n    = snap.vals.length;
+        const step = Math.max(1, WF.data.total_frames / n);
+        const fs   = WF._drawEdits.map(e => e.frame);
+        const lo   = Math.max(0, Math.round(Math.min(...fs) / step));
+        const hi   = Math.min(n - 1, Math.round(Math.max(...fs) / step));
+        const undoEdits = [];
+        for (let si = lo; si <= hi; si++)
+          undoEdits.push({frame: Math.round(si * step), value: snap.vals[si]});
+        if (undoEdits.length) { _undoStack.push({channel: ch, edits: undoEdits}); updateUndoBtn(); }
+      }
+      patchChannel(ch, [...WF._drawEdits]);
+    }
+    WF._drawing = false; WF._drawEdits = []; WF._drawChannel = null; WF._drawSnapshot = null; WF.dragging = false;
     WF.draw();
   }
   canvas.addEventListener('mouseup',    commitDraw);
