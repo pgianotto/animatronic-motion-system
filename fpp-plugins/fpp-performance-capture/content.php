@@ -266,6 +266,7 @@ $step_time_ms = intval($cfg['step_time_ms'] ?? 50);
     <select class="pc-select" id="audio-sel" style="width:220px; font-size:11px;" onchange="setAudioFile(this.value)">
       <option value="">— none —</option>
     </select>
+    <button class="pc-btn btn-ghost btn-sm" onclick="testAudio()" title="Play 3 s to verify audio">Test</button>
     <button class="pc-btn btn-muted btn-sm" onclick="loadMediaFiles()" title="Refresh audio list">↻</button>
     <span id="audio-msg" class="pc-msg" style="margin:0;"></span>
   </div>
@@ -920,6 +921,31 @@ function loadMediaFiles() {
     sel.innerHTML = '<option value="">— none —</option>' +
       files.map(f => `<option value="${f}"${f===cur?' selected':''}>${f}</option>`).join('');
   });
+}
+
+function testAudio() {
+  const el = document.getElementById('audio-msg');
+  el.style.color = '#888'; el.textContent = 'Testing…';
+  fetch(API+'/api/audio/test', {method:'POST'})
+    .then(r=>r.json()).then(d => {
+      if (!d.player) {
+        el.style.color='#e63946';
+        el.textContent = '✗ No audio player found on device (ffplay/mpv/cvlc/mpg123)';
+      } else if (!d.path_exists) {
+        el.style.color='#e63946';
+        el.textContent = `✗ File not found: ${d.path}`;
+      } else if (!d.audio_file) {
+        el.style.color='#fb8500';
+        el.textContent = '⚠ No audio file selected';
+      } else if (d.launched) {
+        el.style.color='#06d6a0';
+        el.textContent = `✓ Playing via ${d.player}`;
+      } else {
+        el.style.color='#e63946';
+        el.textContent = `✗ Launch failed: ${d.error||'unknown'}`;
+      }
+      setTimeout(() => el.textContent='', 6000);
+    });
 }
 
 function setAudioFile(filename) {

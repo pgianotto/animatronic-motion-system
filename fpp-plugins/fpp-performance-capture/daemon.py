@@ -345,22 +345,82 @@ class CaptureDaemon:
 
     # ── Audio ────────────────────────────────────────────────────────────────
 
+    @staticmethod
+    def _find_player():
+        import shutil
+        for b in ('ffplay', 'mpv', 'cvlc', 'mpg123', 'aplay'):
+            if shutil.which(b):
+                return b
+        return None
+
+    @staticmethod
+    def _build_cmd(player: str, path: str, offset_s: float) -> list:
+        ss = offset_s > 0.05
+        if player == 'ffplay':
+            cmd = ['ffplay', '-nodisp', '-autoexit', '-loglevel', 'quiet']
+            if ss: cmd += ['-ss', f'{offset_s:.3f}']
+        elif player == 'mpv':
+            cmd = ['mpv', '--no-video', '--really-quiet']
+            if ss: cmd += [f'--start={offset_s:.3f}']
+        elif player == 'cvlc':
+            cmd = ['cvlc', '--intf', 'dummy', '--play-and-exit']
+            if ss: cmd += [f'--start-time={offset_s:.3f}']
+        elif player == 'mpg123':
+            cmd = ['mpg123', '-q']
+        else:  # aplay
+            cmd = ['aplay', '-q']
+        cmd.append(path)
+        return cmd
+
     def _play_audio(self, filename: str, offset_s: float = 0.0):
         self._stop_audio()
         if not filename:
             return
         path = MEDIA_DIR / Path(filename).name
         if not path.exists():
+            print(f'[audio] file not found: {path}', flush=True)
             return
-        cmd = ['ffplay', '-nodisp', '-autoexit', '-loglevel', 'quiet']
-        if offset_s > 0.05:
-            cmd += ['-ss', f'{offset_s:.3f}']
-        cmd.append(str(path))
+        player = self._find_player()
+        if not player:
+            print('[audio] no player found (tried ffplay, mpv, cvlc, mpg123, aplay)', flush=True)
+            return
+        cmd = self._build_cmd(player, str(path), offset_s)
+        print(f'[audio] {" ".join(cmd)}', flush=True)
         try:
             self._audio_proc = subprocess.Popen(
                 cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-        except Exception:
+        except Exception as exc:
+            print(f'[audio] launch failed: {exc}', flush=True)
             self._audio_proc = None
+
+    def audio_test(self) -> dict:
+        """Play first 3 s of the configured audio file; return diagnostic info."""
+        import shutil
+        filename = self.cfg.get('audio_file', '')
+        player   = self._find_player()
+        path     = (MEDIA_DIR / Path(filename).name) if filename else None
+        info = {
+            'audio_file':   filename,
+            'player':       player,
+            'path':         str(path) if path else None,
+            'path_exists':  path.exists() if path else False,
+            'media_dir':    str(MEDIA_DIR),
+            'media_dir_exists': MEDIA_DIR.exists(),
+        }
+        if player and path and path.exists():
+            cmd = self._build_cmd(player, str(path), 0.0)
+            try:
+                proc = subprocess.Popen(
+                    cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                time.sleep(3)
+                proc.terminate()
+                info['launched'] = True
+            except Exception as exc:
+                info['launched'] = False
+                info['error'] = str(exc)
+        else:
+            info['launched'] = False
+        return info
 
     def _stop_audio(self):
         if self._audio_proc and self._audio_proc.poll() is None:
@@ -749,6 +809,10 @@ def api_sessions():
 @app.route('/api/media/files')
 def api_media_files():
     return jsonify(daemon.list_media_files())
+
+@app.route('/api/audio/test', methods=['POST'])
+def api_audio_test():
+    return jsonify(daemon.audio_test())
 
 @app.route('/api/session/delete', methods=['POST'])
 def api_sess_delete():
