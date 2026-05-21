@@ -6,6 +6,7 @@ into FPP's sequences folder so files appear in FPP's scheduler immediately.
 
 import json
 import os
+import re
 import signal
 import subprocess
 import sys
@@ -354,26 +355,34 @@ class CaptureDaemon:
         return None
 
     @staticmethod
-    def _build_cmd(player: str, path: str, offset_s: float) -> list:
+    def _build_cmd(player: str, path: str, offset_s: float, device: str = '') -> list:
         ss = offset_s > 0.05
+        dev = device if device and device != 'browser' else ''
         if player == 'ffplay':
             cmd = ['ffplay', '-nodisp', '-autoexit', '-loglevel', 'quiet']
             if ss: cmd += ['-ss', f'{offset_s:.3f}']
         elif player == 'mpv':
             cmd = ['mpv', '--no-video', '--really-quiet']
+            if dev: cmd += [f'--audio-device=alsa/{dev}']
             if ss: cmd += [f'--start={offset_s:.3f}']
         elif player == 'cvlc':
             cmd = ['cvlc', '--intf', 'dummy', '--play-and-exit']
             if ss: cmd += [f'--start-time={offset_s:.3f}']
         elif player == 'mpg123':
             cmd = ['mpg123', '-q']
+            if dev: cmd += ['-a', dev]
         else:  # aplay
             cmd = ['aplay', '-q']
+            if dev: cmd += ['-D', dev]
         cmd.append(path)
         return cmd
 
     def _play_audio(self, filename: str, offset_s: float = 0.0):
+        """Play audio on the configured device output. No-op if output=browser."""
         self._stop_audio()
+        output = self.cfg.get('audio_output', 'browser')
+        if output == 'browser':
+            return  # browser-side <audio> element handles playback
         if not filename:
             return
         path = MEDIA_DIR / Path(filename).name
@@ -384,34 +393,63 @@ class CaptureDaemon:
         if not player:
             print('[audio] no player found (tried ffplay, mpv, cvlc, mpg123, aplay)', flush=True)
             return
-        cmd = self._build_cmd(player, str(path), offset_s)
-        print(f'[audio] {" ".join(cmd)}', flush=True)
+        cmd = self._build_cmd(player, str(path), offset_s, output)
+        env = os.environ.copy()
+        if player == 'ffplay' and output not in ('', 'browser'):
+            env['SDL_AUDIODRIVER'] = 'alsa'
+            env['AUDIODEV'] = output
+        print(f'[audio] output={output} {" ".join(cmd)}', flush=True)
         try:
             self._audio_proc = subprocess.Popen(
-                cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, env=env)
         except Exception as exc:
             print(f'[audio] launch failed: {exc}', flush=True)
             self._audio_proc = None
 
+    def list_audio_devices(self) -> list:
+        """Return output options: browser + ALSA playback devices."""
+        devices = [{'label': 'Browser (your computer speakers)', 'value': 'browser'}]
+        try:
+            out = subprocess.check_output(['aplay', '-l'], stderr=subprocess.DEVNULL, text=True)
+            for line in out.splitlines():
+                m = re.match(r'card\s+(\d+)[^:]*:\s+\S+\s+\[([^\]]+)\].*device\s+(\d+)', line)
+                if m:
+                    card, name, dev = m.group(1), m.group(2), m.group(3)
+                    devices.append({
+                        'label': f'Card {card}: {name} (hw:{card},{dev})',
+                        'value': f'hw:{card},{dev}',
+                    })
+        except Exception:
+            pass
+        return devices
+
     def audio_test(self) -> dict:
-        """Play first 3 s of the configured audio file; return diagnostic info."""
-        import shutil
+        """Play 3 s of the configured audio file on the configured device."""
         filename = self.cfg.get('audio_file', '')
-        player   = self._find_player()
+        output   = self.cfg.get('audio_output', 'browser')
+        player   = self._find_player() if output != 'browser' else None
         path     = (MEDIA_DIR / Path(filename).name) if filename else None
         info = {
-            'audio_file':   filename,
-            'player':       player,
-            'path':         str(path) if path else None,
-            'path_exists':  path.exists() if path else False,
-            'media_dir':    str(MEDIA_DIR),
+            'audio_file':       filename,
+            'audio_output':     output,
+            'player':           player,
+            'path':             str(path) if path else None,
+            'path_exists':      path.exists() if path else False,
+            'media_dir':        str(MEDIA_DIR),
             'media_dir_exists': MEDIA_DIR.exists(),
         }
+        if output == 'browser':
+            info['launched'] = 'browser'
+            return info
         if player and path and path.exists():
-            cmd = self._build_cmd(player, str(path), 0.0)
+            cmd = self._build_cmd(player, str(path), 0.0, output)
+            env = os.environ.copy()
+            if player == 'ffplay' and output not in ('', 'browser'):
+                env['SDL_AUDIODRIVER'] = 'alsa'
+                env['AUDIODEV'] = output
             try:
                 proc = subprocess.Popen(
-                    cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                    cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, env=env)
                 time.sleep(3)
                 proc.terminate()
                 info['launched'] = True
@@ -664,6 +702,7 @@ class CaptureDaemon:
             'ports':        self._mapper.port_info(),
             'live_output':  self.cfg.get('live_output', False),
             'audio_file':   self.cfg.get('audio_file', ''),
+            'audio_output': self.cfg.get('audio_output', 'browser'),
             'cam_running':  getattr(self, '_cam_running', False),
         }
 
@@ -809,6 +848,17 @@ def api_sessions():
 @app.route('/api/media/files')
 def api_media_files():
     return jsonify(daemon.list_media_files())
+
+@app.route('/api/audio/devices')
+def api_audio_devices():
+    return jsonify(daemon.list_audio_devices())
+
+@app.route('/api/audio/stream/<path:filename>')
+def api_audio_stream(filename):
+    safe = MEDIA_DIR / Path(filename).name
+    if not safe.exists():
+        return jsonify({'error': 'Not found'}), 404
+    return send_file(str(safe), conditional=True)
 
 @app.route('/api/audio/test', methods=['POST'])
 def api_audio_test():

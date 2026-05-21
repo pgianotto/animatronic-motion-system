@@ -266,10 +266,18 @@ $step_time_ms = intval($cfg['step_time_ms'] ?? 50);
     <select class="pc-select" id="audio-sel" style="width:220px; font-size:11px;" onchange="setAudioFile(this.value)">
       <option value="">— none —</option>
     </select>
-    <button class="pc-btn btn-ghost btn-sm" onclick="testAudio()" title="Play 3 s to verify audio">Test</button>
     <button class="pc-btn btn-muted btn-sm" onclick="loadMediaFiles()" title="Refresh audio list">↻</button>
+  </div>
+  <div style="padding-top:8px; display:flex; align-items:center; gap:10px; flex-wrap:wrap;">
+    <span style="color:var(--muted); font-size:10px; font-weight:bold; letter-spacing:1.5px; text-transform:uppercase; flex-shrink:0;">Audio Output</span>
+    <select class="pc-select" id="audio-out-sel" style="width:260px; font-size:11px;" onchange="setAudioOutput(this.value)">
+      <option value="browser">Browser (your computer speakers)</option>
+    </select>
+    <button class="pc-btn btn-ghost btn-sm" onclick="testAudio()" title="Play 3 s to verify audio">Test</button>
+    <button class="pc-btn btn-muted btn-sm" onclick="loadAudioDevices()" title="Refresh device list">↻</button>
     <span id="audio-msg" class="pc-msg" style="margin:0;"></span>
   </div>
+  <audio id="audio-player" preload="none" style="display:none;"></audio>
 
   <!-- Bottom row: load saved sessions (separate concern) -->
   <div style="padding-top:10px; border-top:1px solid var(--div); display:flex; align-items:center; gap:10px; flex-wrap:wrap;">
@@ -828,10 +836,23 @@ function tlPbStart(frame) {
     body: JSON.stringify({frame, speed: TL.speed, loop: TL.loop})
   }).then(pollStatus);
 }
-function tlPlay()    { tlPbStart(WF.cursor || 0); }
-function tlPause()   { fetch(API+'/api/playback/pause', {method:'POST'}).then(pollStatus); }
-function tlStop()    { fetch(API+'/api/playback/stop',  {method:'POST'}).then(pollStatus); }
-function tlRestart() { tlPbStart(0); }
+function tlPlay() {
+  const offset = (WF.data && WF.data.timestamps) ? (WF.data.timestamps[WF.cursor] ?? 0) : 0;
+  _syncAudio('play', offset);
+  tlPbStart(WF.cursor || 0);
+}
+function tlPause() {
+  _syncAudio('pause');
+  fetch(API+'/api/playback/pause', {method:'POST'}).then(pollStatus);
+}
+function tlStop() {
+  _syncAudio('stop');
+  fetch(API+'/api/playback/stop', {method:'POST'}).then(pollStatus);
+}
+function tlRestart() {
+  _syncAudio('play', 0);
+  tlPbStart(0);
+}
 
 function tlToggleSpeed() {
   TL.speed = TL.speed === 1.0 ? 0.5 : 1.0;
@@ -849,8 +870,12 @@ function _updateTlButtons() {
 }
 
 // ── Recording ─────────────────────────────────────────────────────────────────
-function recStart() { fetch(API+'/api/record/start', {method:'POST'}).then(pollStatus); }
+function recStart() {
+  fetch(API+'/api/record/start', {method:'POST'}).then(pollStatus);
+  _syncAudio('play', 0);
+}
 function recStop()  {
+  _syncAudio('stop');
   fetch(API+'/api/record/stop', {method:'POST'}).then(() => {
     pollStatus();
     WF.load();
@@ -914,6 +939,26 @@ function refreshSessions() {
   });
 }
 
+let _audioOutput = 'browser';
+
+function _syncAudio(action, offsetSec = 0) {
+  if (_audioOutput !== 'browser') return;
+  const file = (document.getElementById('audio-sel') || {}).value || '';
+  if (!file) return;
+  const el = document.getElementById('audio-player');
+  if (!el) return;
+  const src = `${API}/api/audio/stream/${encodeURIComponent(file)}`;
+  if (el.dataset.src !== src) { el.src = src; el.dataset.src = src; el.load(); }
+  if (action === 'play') {
+    el.currentTime = offsetSec;
+    el.play().catch(() => {});
+  } else if (action === 'pause') {
+    el.pause();
+  } else if (action === 'stop') {
+    el.pause(); el.currentTime = 0;
+  }
+}
+
 function loadMediaFiles() {
   fetch(API+'/api/media/files').then(r=>r.json()).then(files => {
     const sel = document.getElementById('audio-sel');
@@ -923,9 +968,31 @@ function loadMediaFiles() {
   });
 }
 
+function loadAudioDevices() {
+  fetch(API+'/api/audio/devices').then(r=>r.json()).then(devs => {
+    const sel = document.getElementById('audio-out-sel');
+    const cur = sel.value;
+    sel.innerHTML = devs.map(d =>
+      `<option value="${d.value}"${d.value===cur?' selected':''}>${d.label}</option>`
+    ).join('');
+  });
+}
+
 function testAudio() {
   const el = document.getElementById('audio-msg');
   el.style.color = '#888'; el.textContent = 'Testing…';
+  if (_audioOutput === 'browser') {
+    // Test by trying to play via _syncAudio
+    const file = (document.getElementById('audio-sel') || {}).value || '';
+    if (!file) {
+      el.style.color='#fb8500'; el.textContent='⚠ No audio file selected';
+      setTimeout(() => el.textContent='', 4000); return;
+    }
+    _syncAudio('play', 0);
+    el.style.color='#06d6a0'; el.textContent='✓ Playing via browser';
+    setTimeout(() => { _syncAudio('stop'); el.textContent=''; }, 4000);
+    return;
+  }
   fetch(API+'/api/audio/test', {method:'POST'})
     .then(r=>r.json()).then(d => {
       if (!d.player) {
@@ -939,7 +1006,7 @@ function testAudio() {
         el.textContent = '⚠ No audio file selected';
       } else if (d.launched) {
         el.style.color='#06d6a0';
-        el.textContent = `✓ Playing via ${d.player}`;
+        el.textContent = `✓ Playing via ${d.player} on ${d.audio_output}`;
       } else {
         el.style.color='#e63946';
         el.textContent = `✗ Launch failed: ${d.error||'unknown'}`;
@@ -956,6 +1023,21 @@ function setAudioFile(filename) {
     const el = document.getElementById('audio-msg');
     el.style.color = d.ok ? '#06d6a0' : '#e63946';
     el.textContent = d.ok ? (filename ? `✓ ${filename}` : '✓ No audio') : '✗ Error';
+    setTimeout(() => el.textContent = '', 3000);
+    const ae = document.getElementById('audio-player');
+    if (ae) ae.dataset.src = '';
+  });
+}
+
+function setAudioOutput(value) {
+  _audioOutput = value;
+  fetch(API+'/api/config', {
+    method:'POST', headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({audio_output: value})
+  }).then(r=>r.json()).then(d => {
+    const el = document.getElementById('audio-msg');
+    el.style.color = d.ok ? '#06d6a0' : '#e63946';
+    el.textContent = d.ok ? '✓ Output saved' : '✗ Error';
     setTimeout(() => el.textContent = '', 3000);
   });
 }
@@ -1075,11 +1157,14 @@ function pollStatus() {
       buildJointTable(s.ports, s.joint_map || {});
     }
 
-    // Sync audio dropdown to config (first poll only — user changes handled by onchange)
+    // Sync audio dropdowns to config (first poll only — user changes handled by onchange)
     if (!pollStatus._audioSynced && s.audio_file !== undefined) {
       const asel = document.getElementById('audio-sel');
-      if (asel && [...asel.options].some(o => o.value === s.audio_file)) {
-        asel.value = s.audio_file;
+      if (asel && [...asel.options].some(o => o.value === s.audio_file)) asel.value = s.audio_file;
+      const osel = document.getElementById('audio-out-sel');
+      if (osel && s.audio_output) {
+        if ([...osel.options].some(o => o.value === s.audio_output)) osel.value = s.audio_output;
+        _audioOutput = s.audio_output;
       }
       pollStatus._audioSynced = true;
     }
@@ -1116,6 +1201,7 @@ function restoreLiveFollow() {
 // ── Init ──────────────────────────────────────────────────────────────────────
 WF.load();
 loadMediaFiles();
+loadAudioDevices();
 setInterval(pollStatus, 500);
 pollStatus();
 </script>
