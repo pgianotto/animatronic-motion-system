@@ -32,14 +32,15 @@ _MAX_CURVE_POINTS = 200
 def _value_curve(pcts: list) -> str:
     """Build an xLights custom value curve string from per-frame percentages.
 
-    xLights Servo effect uses a 0-1000 raw-value scale (RV=TRUE).
-    pcts are 0-100%, so multiply by 10 to convert to the 0-1000 range.
+    xLights Servo effect stores Custom curve y-values as [0,1] normalized
+    fractions with Max=1000 and RV=TRUE (confirmed from native xLights export).
+    pcts are 0-100%, so divide by 100 to get the [0,1] range.
     """
     n = len(pcts)
     if n == 0:
         return "Active=FALSE|Id=ID_VALUECURVE_Servo|Type=Flat|Min=0.00|Max=1000.00|"
     if n == 1:
-        v = round(pcts[0] * 10.0, 2)
+        v = round(pcts[0] / 100.0 * 1000.0, 2)
         return (f"Active=TRUE|Id=ID_VALUECURVE_Servo|"
                 f"Min=0.00|Max=1000.00|P1={v:.2f}|RV=TRUE|")
 
@@ -53,7 +54,7 @@ def _value_curve(pcts: list) -> str:
         indices = list(range(n))
 
     total = len(indices) - 1
-    pts = [f"{i / total:.4f}:{pcts[idx] * 10.0:.4f}" for i, idx in enumerate(indices)]
+    pts = [f"{i / total:.4f}:{pcts[idx] / 100.0:.4f}" for i, idx in enumerate(indices)]
     return (f"Active=TRUE|Id=ID_VALUECURVE_Servo|Type=Custom"
             f"|Min=0.00|Max=1000.00|RV=TRUE|Values={';'.join(pts)}|")
 
@@ -62,10 +63,7 @@ def _servo_settings(servo_num: int, vc: str) -> str:
     return (
         f"E_CHECKBOX_16bit=1,E_CHECKBOX_Timing_Track=0,"
         f"E_CHOICE_Channel=Servo{servo_num},"
-        f"E_TEXTCTRL_EndValue=0.0,"
         f"E_TEXTCTRL_Servo=0.0,"
-        f"E_TOGGLEBUTTON_End=0,"
-        f"E_TOGGLEBUTTON_Start=1,"
         f"E_VALUECURVE_Servo={vc},"
         f"T_CHECKBOX_Canvas=0,T_CHECKBOX_LayerMorph=0,"
         f"T_CHOICE_LayerMethod=Normal,T_SLIDER_EffectLayerMix=0"
