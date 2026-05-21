@@ -81,6 +81,23 @@ NORM_RANGE = {
 }
 
 
+def _interp_val(t: float, timestamps: list, values: list) -> float:
+    """Linear interpolation into a (timestamps, values) series; clamps at ends."""
+    if not timestamps:
+        return 0.0
+    if t <= timestamps[0]:
+        return values[0]
+    if t >= timestamps[-1]:
+        return values[-1]
+    for i in range(len(timestamps) - 1):
+        if timestamps[i] <= t <= timestamps[i + 1]:
+            dt = timestamps[i + 1] - timestamps[i]
+            if dt < 1e-9:
+                return values[i]
+            return values[i] + (t - timestamps[i]) / dt * (values[i + 1] - values[i])
+    return values[-1]
+
+
 def _set_fpp_pca9685_output(enabled: bool):
     """Disable (via API) or re-enable (via file write) fppd's PCA9685 output.
 
@@ -281,6 +298,8 @@ class CaptureDaemon:
         self._pb_speed   = 1.0
         self._pb_loop    = False
         self._audio_proc: subprocess.Popen = None
+        self._rerecord_snapshot: list = []
+        self._rerecord_locked:   set  = set()
 
         self._start_components()
         self._start_camera_thread()
@@ -498,6 +517,45 @@ class CaptureDaemon:
     def stop_recording(self):
         self._capture.stop_recording()
         self._stop_audio()
+        if self._rerecord_locked and self._rerecord_snapshot:
+            self._merge_rerecord()
+        self._rerecord_locked   = set()
+        self._rerecord_snapshot = []
+
+    def start_rerecord(self, locked: list):
+        """Snapshot current session then start recording; on stop, locked channels
+        are restored from the snapshot so only unlocked channels are replaced."""
+        frames = self._capture._frames
+        self._rerecord_snapshot = [(f.timestamp, dict(f.values)) for f in frames]
+        self._rerecord_locked   = set(locked)
+        self._stop_audio()
+        self._capture.start_recording()
+        audio = self.cfg.get('audio_file', '')
+        if audio:
+            self._play_audio(audio)
+
+    def _merge_rerecord(self):
+        snap_ts = [s[0] for s in self._rerecord_snapshot]
+        snap_keys = list(self._rerecord_locked)
+        snap_vals = {k: [s[1].get(k, 0.0) for s in self._rerecord_snapshot]
+                     for k in snap_keys}
+        for f in self._capture._frames:
+            for key in snap_keys:
+                f.values[key] = _interp_val(f.timestamp, snap_ts, snap_vals[key])
+
+    def patch_frames(self, channel: str, edits: list) -> dict:
+        """Apply sparse {frame, value} edits to a channel; interpolates between points."""
+        frames = self._capture._frames
+        if not frames or not channel or not edits:
+            return {'ok': False, 'error': 'no frames or channel'}
+        edits = sorted(edits, key=lambda e: int(e['frame']))
+        idxs  = [int(e['frame']) for e in edits]
+        vals  = [float(e['value']) for e in edits]
+        n     = len(frames)
+        start, end = idxs[0], idxs[-1]
+        for i in range(max(0, start), min(end + 1, n)):
+            frames[i].values[channel] = _interp_val(i, idxs, vals)
+        return {'ok': True, 'patched': max(0, min(end, n - 1) - start + 1)}
 
     # ── Playback ─────────────────────────────────────────────────────────────
 
@@ -736,6 +794,20 @@ def api_rec_start():
 def api_rec_stop():
     daemon.stop_recording()
     return jsonify(daemon.status())
+
+@app.route('/api/record/rerecord', methods=['POST'])
+def api_rerecord_start():
+    data   = request.get_json(force=True, silent=True) or {}
+    locked = data.get('locked', [])
+    daemon.start_rerecord(locked)
+    return jsonify({'ok': True})
+
+@app.route('/api/session/frames/patch', methods=['POST'])
+def api_patch_frames():
+    data    = request.get_json(force=True, silent=True) or {}
+    channel = data.get('channel', '')
+    edits   = data.get('edits', [])
+    return jsonify(daemon.patch_frames(channel, edits))
 
 @app.route('/api/session/frames')
 def api_sess_frames():

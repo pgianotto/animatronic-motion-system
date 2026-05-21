@@ -307,6 +307,19 @@ $step_time_ms = intval($cfg['step_time_ms'] ?? 50);
     </div>
   </div>
 
+  <!-- Edit toolbar -->
+  <div style="display:flex; gap:6px; align-items:center; flex-wrap:wrap; margin-bottom:10px;
+              padding:7px 10px; background:var(--dark); border-radius:4px;">
+    <span style="color:var(--muted); font-size:10px; font-weight:bold; letter-spacing:1px;
+                 text-transform:uppercase; margin-right:2px;">Edit</span>
+    <button class="pc-btn btn-ghost btn-sm" id="btn-edit-mode" onclick="toggleEditMode()">✎ Draw</button>
+    <button class="pc-btn btn-rec   btn-sm" onclick="rerecordStart()">⏺ Re-record</button>
+    <span id="lock-status" style="color:var(--amber); font-size:11px; margin-left:4px;"></span>
+    <span style="color:#333; font-size:11px; margin-left:auto;">
+      Click lock icon per channel · drag in Draw mode to edit values
+    </span>
+  </div>
+
   <!-- Scrub -->
   <input type="range" class="pc-scrub" id="scrub-slider"
          min="0" max="<?= max(1, $fc - 1) ?>" value="0"
@@ -485,8 +498,9 @@ const WF = {
   data: null, filter: 'all',
   checked: Object.fromEntries(JOINTS.map(j => [j.key, true])),
   cursor: 0, dragging: false,
-  LABEL_W:110, VAL_W:50, ROW_H:28, RULER_H:18, PAD:4,
+  LOCK_W:22, LABEL_W:110, VAL_W:50, ROW_H:28, RULER_H:18, PAD:4,
   FACE_COL:'#4cc9f0', BODY_COL:'#fb8500',
+  editMode: false, _drawing: false, _drawChannel: null, _drawEdits: [],
 
   visible() {
     if (!this.data) return [];
@@ -538,8 +552,8 @@ const WF = {
 
     const ctx = canvas.getContext('2d');
     ctx.scale(dpr, dpr);
-    const waveX = this.LABEL_W;
-    const waveW = Math.max(cssW - this.LABEL_W - this.VAL_W, 1);
+    const waveX = this.LOCK_W + this.LABEL_W;
+    const waveW = Math.max(cssW - waveX - this.VAL_W, 1);
 
     if (!this.data || this.data.total_frames === 0 || nRows === 0) {
       ctx.fillStyle = '#0d0d1f'; ctx.fillRect(0, 0, cssW, cssH);
@@ -572,7 +586,17 @@ const WF = {
       const vals   = this.data.data[j.key] || [];
 
       ctx.fillStyle = rowBg; ctx.fillRect(0, ry, cssW, this.ROW_H);
+      if (_locked[j.key]) { ctx.fillStyle = 'rgba(251,133,0,0.09)'; ctx.fillRect(0, ry, cssW, this.ROW_H); }
       if (mapped) { ctx.fillStyle = color; ctx.fillRect(0, ry, 3, this.ROW_H); }
+      if (WF.editMode && !_locked[j.key]) { ctx.fillStyle = 'rgba(76,201,240,0.04)'; ctx.fillRect(waveX, ry, waveW, this.ROW_H); }
+      if (WF._drawChannel === j.key) { ctx.fillStyle = 'rgba(76,201,240,0.10)'; ctx.fillRect(waveX, ry, waveW, this.ROW_H); }
+      // Lock icon
+      const lx = 4, lcy = ry + this.ROW_H / 2 - 1;
+      ctx.lineWidth = 1.5; ctx.strokeStyle = _locked[j.key] ? '#fb8500' : '#2a2a3a';
+      ctx.strokeRect(lx, lcy, 10, 7);
+      ctx.beginPath();
+      _locked[j.key] ? ctx.arc(lx + 5, lcy, 3, Math.PI, 0) : ctx.arc(lx + 5, lcy, 3, Math.PI, Math.PI * 1.6);
+      ctx.stroke();
 
       ctx.font = `${mapped ? 'bold ' : ''}10px sans-serif`;
       ctx.fillStyle = mapped ? color : '#555';
@@ -643,13 +667,56 @@ const WF = {
     if (!this.data || this.data.total_frames === 0) return;
     const canvas = document.getElementById('wf-canvas');
     const rect   = canvas.getBoundingClientRect();
-    const waveW  = Math.max(rect.width - this.LABEL_W - this.VAL_W, 1);
-    const frac   = Math.max(0, Math.min(1, (canvasX - this.LABEL_W) / waveW));
+    const waveW  = Math.max(rect.width - this.LOCK_W - this.LABEL_W - this.VAL_W, 1);
+    const frac   = Math.max(0, Math.min(1, (canvasX - this.LOCK_W - this.LABEL_W) / waveW));
     const frame  = Math.round(frac * (this.data.total_frames - 1));
     fetch(API + '/api/playback/seek', {
       method:'POST', headers:{'Content-Type':'application/json'},
       body: JSON.stringify({frame})
     }).then(() => { this.cursor = frame; this.draw(); updateScrubSlider(frame); });
+  },
+
+  _drawAtPoint(x, y) {
+    if (!this.data || this.data.total_frames === 0) return;
+    const canvas  = document.getElementById('wf-canvas');
+    const vis     = this.visible();
+    const rowIdx  = Math.floor((y - this.RULER_H) / this.ROW_H);
+    if (rowIdx < 0 || rowIdx >= vis.length) return;
+    const j = vis[rowIdx];
+    if (_locked[j.key]) return;
+    if (this._drawChannel && this._drawChannel !== j.key) return;
+    this._drawChannel = j.key;
+    const waveX  = this.LOCK_W + this.LABEL_W;
+    const waveW  = Math.max(canvas.offsetWidth - waveX - this.VAL_W, 1);
+    const frac   = Math.max(0, Math.min(1, (x - waveX) / waveW));
+    const frameIdx = Math.round(frac * (this.data.total_frames - 1));
+    const rowTop = this.RULER_H + rowIdx * this.ROW_H;
+    const yFrac  = 1 - Math.max(0, Math.min(1, (y - rowTop - this.PAD) / (this.ROW_H - 2 * this.PAD)));
+    const value  = j.lo + yFrac * (j.hi - j.lo);
+    const last = this._drawEdits[this._drawEdits.length - 1];
+    if (last && last.frame === frameIdx) { last.value = value; }
+    else { this._drawEdits.push({frame: frameIdx, value}); }
+    // Live preview: interpolate between last two points into display data
+    const vals = this.data.data[j.key];
+    if (vals) {
+      const n    = this.data.timestamps.length;
+      const step = Math.max(1, this.data.total_frames / n);
+      if (this._drawEdits.length >= 2) {
+        const prev = this._drawEdits[this._drawEdits.length - 2];
+        const curr = this._drawEdits[this._drawEdits.length - 1];
+        const pIdx = Math.min(Math.round(prev.frame / step), n - 1);
+        const cIdx = Math.min(Math.round(curr.frame / step), n - 1);
+        const lo = Math.min(pIdx, cIdx), hi = Math.max(pIdx, cIdx);
+        for (let si = lo; si <= hi; si++) {
+          const t = lo === hi ? 0 : (si - lo) / (hi - lo);
+          vals[si] = (pIdx <= cIdx ? prev.value : curr.value) * (1 - t) +
+                     (pIdx <= cIdx ? curr.value : prev.value) * t;
+        }
+      } else {
+        vals[Math.min(Math.round(frameIdx / step), n - 1)] = value;
+      }
+    }
+    this.draw();
   },
 };
 
@@ -662,15 +729,83 @@ function wfSetFilter(mode) {
   WF.draw();
 }
 
+// ── Editor: lock, draw-edit, re-record ───────────────────────────────────────
+const _locked = {};
+
+function updateLockStatus() {
+  const n = Object.values(_locked).filter(Boolean).length;
+  const el = document.getElementById('lock-status');
+  if (el) el.textContent = n > 0 ? `${n} locked` : '';
+}
+
+function toggleEditMode() {
+  WF.editMode = !WF.editMode;
+  const canvas = document.getElementById('wf-canvas');
+  canvas.style.cursor = WF.editMode ? 'crosshair' : '';
+  const btn = document.getElementById('btn-edit-mode');
+  if (btn) {
+    btn.textContent  = WF.editMode ? '✎ Editing' : '✎ Draw';
+    btn.className    = 'pc-btn btn-sm ' + (WF.editMode ? 'btn-pause' : 'btn-ghost');
+  }
+  WF.draw();
+}
+
+function patchChannel(channel, edits) {
+  if (!channel || !edits || !edits.length) return;
+  fetch(API + '/api/session/frames/patch', {
+    method: 'POST', headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({channel, edits})
+  }).then(r => r.json()).then(d => {
+    if (!d.ok) console.warn('Patch failed:', d.error);
+    WF.load();
+  });
+}
+
+function rerecordStart() {
+  const locked = Object.entries(_locked).filter(([, v]) => v).map(([k]) => k);
+  fetch(API + '/api/record/rerecord', {
+    method: 'POST', headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({locked})
+  }).then(r => r.json()).then(d => {
+    if (d.ok) { _syncAudio('play', 0); pollStatus(); }
+  });
+}
+
 (function() {
   const canvas = document.getElementById('wf-canvas');
   canvas.addEventListener('mousedown', e => {
-    if (e.offsetX < WF.LABEL_W) return;
-    WF.dragging = true; WF.seek(e.offsetX);
+    const x = e.offsetX, y = e.offsetY;
+    // Lock zone: click toggles lock for the row under cursor
+    if (x < WF.LOCK_W) {
+      const rowIdx = Math.floor((y - WF.RULER_H) / WF.ROW_H);
+      const vis = WF.visible();
+      if (rowIdx >= 0 && rowIdx < vis.length) {
+        const key = vis[rowIdx].key;
+        _locked[key] = !_locked[key];
+        updateLockStatus();
+        WF.draw();
+      }
+      return;
+    }
+    // Edit/draw mode: drag to draw new values on a channel
+    if (WF.editMode && x >= WF.LOCK_W + WF.LABEL_W) {
+      WF._drawing = true; WF._drawEdits = []; WF._drawAtPoint(x, y); return;
+    }
+    // Seek mode
+    if (x < WF.LOCK_W + WF.LABEL_W) return;
+    WF.dragging = true; WF.seek(x);
   });
-  canvas.addEventListener('mousemove', e => { if (WF.dragging) WF.seek(e.offsetX); });
-  canvas.addEventListener('mouseup',    () => { WF.dragging = false; });
-  canvas.addEventListener('mouseleave', () => { WF.dragging = false; });
+  canvas.addEventListener('mousemove', e => {
+    if (WF._drawing) { WF._drawAtPoint(e.offsetX, e.offsetY); return; }
+    if (WF.dragging) WF.seek(e.offsetX);
+  });
+  function commitDraw() {
+    if (WF._drawing && WF._drawEdits.length > 0) patchChannel(WF._drawChannel, [...WF._drawEdits]);
+    WF._drawing = false; WF._drawEdits = []; WF._drawChannel = null; WF.dragging = false;
+    WF.draw();
+  }
+  canvas.addEventListener('mouseup',    commitDraw);
+  canvas.addEventListener('mouseleave', commitDraw);
   window.addEventListener('resize', () => WF.draw());
 })();
 
