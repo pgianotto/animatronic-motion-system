@@ -176,6 +176,12 @@ $step_time_ms = intval($cfg['step_time_ms'] ?? 50);
           <?= $recording ? '● REC' : 'IDLE' ?>
         </span>
       </div>
+      <div style="position:absolute; top:10px; right:10px;">
+        <button id="btn-live" class="pc-btn btn-sm <?= ($cfg['live_output'] ?? false) ? 'btn-live-on' : 'btn-live-off' ?>"
+                onclick="toggleLive()">
+          <?= ($cfg['live_output'] ?? false) ? '⏹ Live ON' : '⏵ Live OFF' ?>
+        </button>
+      </div>
       <div class="cam-controls">
         <span id="rec-info" style="font-size:11px; color:#ccc; margin-right:auto; font-family:monospace;">
           <?= $dur ?> &nbsp;·&nbsp; <?= $fc ?> frames
@@ -219,79 +225,75 @@ $step_time_ms = intval($cfg['step_time_ms'] ?? 50);
     </div>
 
     <div class="rp-section">
-      <button id="btn-live" class="pc-btn <?= ($cfg['live_output'] ?? false) ? 'btn-live-on' : 'btn-live-off' ?>"
-              style="width:100%;" onclick="toggleLive()">
-        <?= ($cfg['live_output'] ?? false) ? '⏹ Live Output ON' : '⏵ Live Output OFF' ?>
-      </button>
+      <div class="rp-hdr">Session &amp; Audio</div>
+
+      <div style="margin-bottom:9px;">
+        <div style="color:var(--muted); font-size:10px; font-weight:bold; letter-spacing:1.2px; text-transform:uppercase; margin-bottom:4px;">Load Saved</div>
+        <div style="display:flex; gap:4px; align-items:center; flex-wrap:wrap;">
+          <select class="pc-select" id="sess-load-sel" style="flex:1; min-width:0; font-size:11px;">
+            <?php foreach ($sessions as $s): ?>
+              <option><?= htmlspecialchars($s) ?></option>
+            <?php endforeach; ?>
+          </select>
+          <button class="pc-btn btn-ghost btn-sm" onclick="sessLoad()">Load</button>
+          <button class="pc-btn btn-halt  btn-sm" onclick="sessDelete()">Del</button>
+          <button class="pc-btn btn-muted btn-sm" onclick="refreshSessions()" title="Refresh">↻</button>
+        </div>
+      </div>
+
+      <div style="margin-bottom:9px;">
+        <div style="color:var(--muted); font-size:10px; font-weight:bold; letter-spacing:1.2px; text-transform:uppercase; margin-bottom:4px;">Audio Track</div>
+        <div style="display:flex; gap:4px; align-items:center;">
+          <select class="pc-select" id="audio-sel" style="flex:1; min-width:0; font-size:11px;" onchange="setAudioFile(this.value)">
+            <option value="">— none —</option>
+          </select>
+          <button class="pc-btn btn-muted btn-sm" onclick="loadMediaFiles()" title="Refresh">↻</button>
+        </div>
+      </div>
+
+      <div style="margin-bottom:9px;">
+        <div style="color:var(--muted); font-size:10px; font-weight:bold; letter-spacing:1.2px; text-transform:uppercase; margin-bottom:4px;">Audio Output</div>
+        <div style="display:flex; gap:4px; align-items:center; flex-wrap:wrap;">
+          <select class="pc-select" id="audio-out-sel" style="flex:1; min-width:0; font-size:11px;" onchange="setAudioOutput(this.value)">
+            <option value="browser">Browser (your computer speakers)</option>
+          </select>
+          <button class="pc-btn btn-ghost btn-sm" onclick="testAudio()">Test</button>
+          <button class="pc-btn btn-muted btn-sm" onclick="loadAudioDevices()" title="Refresh">↻</button>
+        </div>
+        <span id="audio-msg" class="pc-msg" style="display:block; margin-top:3px;"></span>
+      </div>
+
+      <div>
+        <div style="color:var(--muted); font-size:10px; font-weight:bold; letter-spacing:1.2px; text-transform:uppercase; margin-bottom:4px;">
+          Save to File <span style="color:#444; font-size:9px; font-weight:normal; letter-spacing:0; text-transform:none;">(optional)</span>
+        </div>
+        <div style="display:flex; gap:4px; align-items:center;">
+          <input class="pc-input" id="sess-save-name" value="" placeholder="record first, then save"
+                 style="flex:1; min-width:0; font-size:11px;">
+          <button class="pc-btn btn-ghost btn-sm" onclick="sessSave()">Save</button>
+        </div>
+      </div>
+
+      <span id="status-msg" class="pc-msg" style="display:block; margin-top:8px;"></span>
+      <audio id="audio-player" preload="none" style="display:none;"></audio>
+
     </div>
 
   </div><!-- /right panel -->
 </div><!-- /row 1 -->
 
 <!-- ══ Session ═══════════════════════════════════════════════════════════════ -->
-<div class="pc-card">
-
-  <!-- Top row: status + save (post-recording actions) -->
-  <div style="display:flex; gap:16px; align-items:flex-start; flex-wrap:wrap; margin-bottom:12px;">
-
-    <!-- Status -->
-    <div style="flex:1; min-width:180px;">
-      <div class="rp-hdr">Current Session</div>
-      <div id="sess-status" style="font-size:12px; font-family:monospace; color:var(--fg); line-height:1.8;">
-        <?php if ($session_name): ?>
-          <span style="color:var(--cyan);"><?= htmlspecialchars($session_name) ?></span>
-          &nbsp;·&nbsp; <span id="sess-frames" style="color:var(--muted);"><?= $fc ?> frames</span>
-          &nbsp;·&nbsp; <span id="sess-dur" style="color:var(--muted);"><?= $dur ?></span>
-        <?php else: ?>
-          <span style="color:#444;">No session — record above or load below</span>
-        <?php endif; ?>
-      </div>
-    </div>
-
-    <!-- Save — labeled optional, auto-filled after recording -->
-    <div style="flex-shrink:0;">
-      <div class="rp-hdr">Save to File <span style="color:#444; font-size:9px; font-weight:normal; letter-spacing:0;">(optional — export works without saving)</span></div>
-      <div style="display:flex; gap:6px; align-items:center;">
-        <input class="pc-input" id="sess-save-name" value="" placeholder="record first, then save" style="width:200px; font-size:11px;">
-        <button class="pc-btn btn-ghost btn-sm" onclick="sessSave()">Save</button>
-      </div>
-    </div>
-
-    <span id="status-msg" class="pc-msg" style="margin:0; align-self:flex-end;"></span>
+<div class="pc-card" style="padding:12px 18px;">
+  <div class="rp-hdr" style="margin-bottom:6px;">Current Session</div>
+  <div id="sess-status" style="font-size:12px; font-family:monospace; color:var(--fg); line-height:1.8;">
+    <?php if ($session_name): ?>
+      <span style="color:var(--cyan);"><?= htmlspecialchars($session_name) ?></span>
+      &nbsp;·&nbsp; <span id="sess-frames" style="color:var(--muted);"><?= $fc ?> frames</span>
+      &nbsp;·&nbsp; <span id="sess-dur" style="color:var(--muted);"><?= $dur ?></span>
+    <?php else: ?>
+      <span style="color:#444;">No session — record above or load from the panel</span>
+    <?php endif; ?>
   </div>
-
-  <!-- Audio track row -->
-  <div style="padding-top:10px; border-top:1px solid var(--div); display:flex; align-items:center; gap:10px; flex-wrap:wrap;">
-    <span style="color:var(--muted); font-size:10px; font-weight:bold; letter-spacing:1.5px; text-transform:uppercase; flex-shrink:0;">Audio Track</span>
-    <select class="pc-select" id="audio-sel" style="width:220px; font-size:11px;" onchange="setAudioFile(this.value)">
-      <option value="">— none —</option>
-    </select>
-    <button class="pc-btn btn-muted btn-sm" onclick="loadMediaFiles()" title="Refresh audio list">↻</button>
-  </div>
-  <div style="padding-top:8px; display:flex; align-items:center; gap:10px; flex-wrap:wrap;">
-    <span style="color:var(--muted); font-size:10px; font-weight:bold; letter-spacing:1.5px; text-transform:uppercase; flex-shrink:0;">Audio Output</span>
-    <select class="pc-select" id="audio-out-sel" style="width:260px; font-size:11px;" onchange="setAudioOutput(this.value)">
-      <option value="browser">Browser (your computer speakers)</option>
-    </select>
-    <button class="pc-btn btn-ghost btn-sm" onclick="testAudio()" title="Play 3 s to verify audio">Test</button>
-    <button class="pc-btn btn-muted btn-sm" onclick="loadAudioDevices()" title="Refresh device list">↻</button>
-    <span id="audio-msg" class="pc-msg" style="margin:0;"></span>
-  </div>
-  <audio id="audio-player" preload="none" style="display:none;"></audio>
-
-  <!-- Bottom row: load saved sessions (separate concern) -->
-  <div style="padding-top:10px; border-top:1px solid var(--div); display:flex; align-items:center; gap:10px; flex-wrap:wrap;">
-    <span style="color:var(--muted); font-size:10px; font-weight:bold; letter-spacing:1.5px; text-transform:uppercase; flex-shrink:0;">Load Saved</span>
-    <select class="pc-select" id="sess-load-sel" style="width:200px; font-size:11px;">
-      <?php foreach ($sessions as $s): ?>
-        <option><?= htmlspecialchars($s) ?></option>
-      <?php endforeach; ?>
-    </select>
-    <button class="pc-btn btn-ghost btn-sm" onclick="sessLoad()">Load</button>
-    <button class="pc-btn btn-halt  btn-sm" onclick="sessDelete()">Delete</button>
-    <button class="pc-btn btn-muted btn-sm" onclick="refreshSessions()" title="Refresh list">↻</button>
-  </div>
-
 </div>
 
 <!-- ══ Timeline ═══════════════════════════════════════════════════════════════ -->
@@ -807,8 +809,8 @@ function toggleLive() {
 function setLiveBtn(on) {
   const btn = document.getElementById('btn-live');
   if (!btn) return;
-  btn.textContent = on ? '⏹ Live Output ON' : '⏵ Live Output OFF';
-  btn.className   = 'pc-btn ' + (on ? 'btn-live-on' : 'btn-live-off');
+  btn.textContent = on ? '⏹ Live ON' : '⏵ Live OFF';
+  btn.className   = 'pc-btn btn-sm ' + (on ? 'btn-live-on' : 'btn-live-off');
 }
 
 // ── Smoothing ─────────────────────────────────────────────────────────────────
