@@ -209,10 +209,8 @@ class PCA9685Writer:
         for port, us in commands:
             counts = self._us_to_counts(us)
             base   = 0x06 + port * 4
-            self._bus.write_byte_data(self._addr, base,     0x00)
-            self._bus.write_byte_data(self._addr, base + 1, 0x00)
-            self._bus.write_byte_data(self._addr, base + 2, counts & 0xFF)
-            self._bus.write_byte_data(self._addr, base + 3, counts >> 8)
+            self._bus.write_i2c_block_data(self._addr, base,
+                                           [0x00, 0x00, counts & 0xFF, counts >> 8])
 
 def _load_cfg() -> dict:
     if CFG_PATH.exists():
@@ -314,6 +312,8 @@ class CaptureDaemon:
         self._mapper  = JointMapper(self.cfg.get('joint_map', {}),
                                     self.cfg.get('pca_output_idx', 0))
         self._writer  = PCA9685Writer(self._mapper._out) if self._mapper._out else None
+        if self.cfg.get('live_output', False):
+            _set_fpp_pca9685_output(False)
 
     def _start_camera_thread(self):
         if not self._camera.start():
