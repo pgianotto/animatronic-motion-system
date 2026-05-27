@@ -47,7 +47,7 @@ DEFAULTS = {
     'camera_index':       0,
     'camera_width':       640,
     'camera_height':      480,
-    'hardware_type':      'pca9685',
+    'hardware_type':      'mock',
     'pca9685_address':    '0x40',
     'pca9685_frequency':  50,
     'channel_pan':        0,
@@ -98,34 +98,33 @@ def _interp_val(t: float, timestamps: list, values: list) -> float:
     return values[-1]
 
 
-def _set_fpp_pca9685_output(enabled: bool):
-    """Disable (via API) or re-enable (via file write) fppd's PCA9685 output.
+def _set_fpp_pca9685_output(enabled: bool) -> bool:
+    """Enable or disable fppd's PCA9685 output via the FPP API.
 
-    POSTing the re-enable via the API causes fppd to enter a crash/restart loop
-    because it tries to re-initialize the chip while we still hold the I2C bus.
-    Writing the file only means fppd picks it up on its next clean restart.
+    Both directions use the API so the change takes effect immediately.
+    Returns True on success.
     """
     try:
         with urllib.request.urlopen(CO_OTHER_API, timeout=3) as resp:
             cfg = json.loads(resp.read())
         changed = False
         for out in cfg.get('channelOutputs', []):
-            if out.get('type') == 'PCA9685':
+            t = out.get('type', '')
+            if 'PCA9685' in t or (out.get('ports') and out.get('deviceID') is not None):
                 out['enabled'] = 1 if enabled else 0
                 changed = True
         if not changed:
-            return
-        if not enabled:
-            data = json.dumps(cfg).encode()
-            req  = urllib.request.Request(CO_OTHER_API, data=data, method='POST',
-                                          headers={'Content-Type': 'application/json'})
-            urllib.request.urlopen(req, timeout=3)
-            print('[Capture] FPP PCA9685 output disabled.')
-        else:
-            CO_OTHER_PATH.write_text(json.dumps(cfg, indent=2))
-            print('[Capture] FPP PCA9685 re-enabled in config (takes effect on next fppd restart).')
+            print('[Capture] WARNING: no PCA9685 channel output found in co-other config.', flush=True)
+            return True
+        data = json.dumps(cfg).encode()
+        req  = urllib.request.Request(CO_OTHER_API, data=data, method='POST',
+                                      headers={'Content-Type': 'application/json'})
+        urllib.request.urlopen(req, timeout=3)
+        print(f'[Capture] FPP PCA9685 output {"enabled" if enabled else "disabled"}.', flush=True)
+        return True
     except Exception as exc:
-        print(f'[Capture] Could not toggle FPP PCA9685 output: {exc}')
+        print(f'[Capture] Could not toggle FPP PCA9685 output: {exc}', flush=True)
+        return False
 
 
 def _load_co_other(out_idx: int) -> dict | None:
@@ -289,6 +288,7 @@ class CaptureDaemon:
         self._values      = {}
 
         self._servo_pos:  dict = {}
+        self._servo_last: dict = {}
         self._pb_thread: threading.Thread = None
         self._session_name = ''
         self._pb_stop    = threading.Event()
@@ -305,13 +305,18 @@ class CaptureDaemon:
         self._start_camera_thread()
 
     def _smooth_servos(self, cmds: list) -> list:
-        alpha = float(self.cfg.get('servo_smoothing', 0.25))
+        alpha    = float(self.cfg.get('servo_smoothing', 0.25))
+        deadband = int(self.cfg.get('servo_deadband', 4))
         out = []
         for port, us in cmds:
-            prev = self._servo_pos.get(port, us)
+            prev     = self._servo_pos.get(port, us)
             smoothed = prev + alpha * (us - prev)
             self._servo_pos[port] = smoothed
-            out.append((port, round(smoothed)))
+            rounded  = round(smoothed)
+            last     = self._servo_last.get(port)
+            if last is None or abs(rounded - last) >= deadband:
+                self._servo_last[port] = rounded
+                out.append((port, rounded))
         return out
 
     def _start_components(self):
@@ -330,9 +335,34 @@ class CaptureDaemon:
         self._capture  = MotionCaptureMode(servos, cc)
         self._mapper  = JointMapper(self.cfg.get('joint_map', {}),
                                     self.cfg.get('pca_output_idx', 0))
-        self._writer  = PCA9685Writer(self._mapper._out) if self._mapper._out else None
+        # Only open smbus2 when live_output is active — avoids conflicting with fppd
+        self._writer  = None
         if self.cfg.get('live_output', False):
-            _set_fpp_pca9685_output(False)
+            self._open_live_output()
+
+    def _open_live_output(self):
+        """Disable fppd's PCA9685 output and open smbus2. Retries until Apache is up."""
+        for attempt in range(15):
+            if _set_fpp_pca9685_output(False):
+                break
+            print(f'[Capture] Waiting for FPP API (attempt {attempt + 1}/15)...')
+            time.sleep(4)
+        else:
+            print('[Capture] ERROR: could not disable FPP PCA9685 output.', flush=True)
+            return
+        time.sleep(0.5)
+        out = self._mapper._out
+        self._writer = PCA9685Writer(out) if out else None
+
+    def _close_live_output(self):
+        """Close smbus2 and immediately re-enable fppd's PCA9685 output."""
+        if self._writer and self._writer._bus:
+            try:
+                self._writer._bus.close()
+            except Exception:
+                pass
+        self._writer = None
+        _set_fpp_pca9685_output(True)
 
     def _start_camera_thread(self):
         if not self._camera.start():
@@ -628,7 +658,7 @@ class CaptureDaemon:
                 self._capture.play_frame(frame.values)
                 self._pb_pos = i
                 cmds = self._mapper.compute(frame.values)
-                if cmds:
+                if cmds and self.cfg.get('live_output'):
                     cmds = self._smooth_servos(cmds)
                     if self._writer:
                         self._writer.set_channels(cmds)
@@ -845,7 +875,7 @@ def api_pb_seek():
     frame = frames[idx]
     daemon._capture.play_frame(frame.values)
     cmds = daemon._mapper.compute(frame.values)
-    if cmds:
+    if cmds and daemon.cfg.get('live_output'):
         cmds = daemon._smooth_servos(cmds)
         if daemon._writer:
             daemon._writer.set_channels(cmds)
@@ -964,9 +994,10 @@ def api_set_cfg():
     if 'live_output' in updates:
         new_live = daemon.cfg.get('live_output', False)
         if new_live and not prev_live:
-            _set_fpp_pca9685_output(False)
+            daemon._servo_last.clear()
+            daemon._open_live_output()
         elif not new_live and prev_live:
-            _set_fpp_pca9685_output(True)
+            daemon._close_live_output()
     return jsonify({'ok': True})
 
 @app.route('/api/camera/release', methods=['POST'])
@@ -995,7 +1026,7 @@ def stream():
 
 def _shutdown(sig, frame):
     if daemon.cfg.get('live_output', False):
-        _set_fpp_pca9685_output(True)
+        daemon._close_live_output()
     sys.exit(0)
 
 
