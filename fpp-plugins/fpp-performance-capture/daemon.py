@@ -4,7 +4,10 @@ Handles recording, session save/load, playback, and FSEQ export directly
 into FPP's sequences folder so files appear in FPP's scheduler immediately.
 """
 
+import bisect
+import http.client
 import json
+import queue
 import os
 import re
 import signal
@@ -12,7 +15,6 @@ import subprocess
 import sys
 import threading
 import time
-import urllib.request
 from pathlib import Path
 
 PLUGIN_DIR   = Path(__file__).parent
@@ -34,7 +36,6 @@ from modes.motion_capture import MotionCaptureMode
 
 CFG_PATH      = Path('/home/fpp/media/config/animatronic_capture.json')
 CO_OTHER_PATH = Path('/home/fpp/media/config/co-other.json')
-CO_OTHER_API  = 'http://localhost/api/channel/output/co-other'
 FSEQ_DIR  = Path('/home/fpp/media/sequences')
 SESS_DIR  = Path('/home/fpp/media/animations')
 MEDIA_DIR = Path('/home/fpp/media/music')
@@ -97,34 +98,6 @@ def _interp_val(t: float, timestamps: list, values: list) -> float:
             return values[i] + (t - timestamps[i]) / dt * (values[i + 1] - values[i])
     return values[-1]
 
-
-def _set_fpp_pca9685_output(enabled: bool) -> bool:
-    """Enable or disable fppd's PCA9685 output via the FPP API.
-
-    Both directions use the API so the change takes effect immediately.
-    Returns True on success.
-    """
-    try:
-        with urllib.request.urlopen(CO_OTHER_API, timeout=3) as resp:
-            cfg = json.loads(resp.read())
-        changed = False
-        for out in cfg.get('channelOutputs', []):
-            t = out.get('type', '')
-            if 'PCA9685' in t or (out.get('ports') and out.get('deviceID') is not None):
-                out['enabled'] = 1 if enabled else 0
-                changed = True
-        if not changed:
-            print('[Capture] WARNING: no PCA9685 channel output found in co-other config.', flush=True)
-            return True
-        data = json.dumps(cfg).encode()
-        req  = urllib.request.Request(CO_OTHER_API, data=data, method='POST',
-                                      headers={'Content-Type': 'application/json'})
-        urllib.request.urlopen(req, timeout=3)
-        print(f'[Capture] FPP PCA9685 output {"enabled" if enabled else "disabled"}.', flush=True)
-        return True
-    except Exception as exc:
-        print(f'[Capture] Could not toggle FPP PCA9685 output: {exc}', flush=True)
-        return False
 
 
 def _load_co_other(out_idx: int) -> dict | None:
@@ -189,44 +162,118 @@ class JointMapper:
         ]
 
 
-class PCA9685Writer:
-    """Writes µs values directly to a PCA9685 via I2C (smbus2)."""
+class OverlayWriter:
+    """Writes µs servo values into FPP's channel buffer via the overlay range API.
+
+    FPP keeps full ownership of the PCA9685 and I2C bus.  HTTP PUTs happen on a
+    background thread so set_channels() never blocks the playback timing loop.
+    Latest-value-wins: if the sender falls behind, stale values are discarded and
+    only the most recent position per channel is sent.
+    """
 
     def __init__(self, out: dict):
-        self._bus  = None
-        self._freq = 50.0
-        self._addr = int(out.get('deviceID', 0x40))
-        dev = out.get('device', 'i2c-1')
-        bus_num = int(dev.split('-')[-1])
+        self._pending: dict  = {}   # fpp_ch → body str (latest per channel)
+        self._plock          = threading.Lock()
+        self._event          = threading.Event()
+        self._running        = True
+        sc = int(out.get('startChannel', 1))
+        self._ports = []
+        for p in out.get('ports', []):
+            dt = p.get('dataType', 0)
+            is_16bit = dt in (2, 3, 5)
+            self._ports.append({
+                'fpp_ch':    sc,
+                'is_16bit':  is_16bit,
+                'min_us':    float(p.get('min',    500)),
+                'center_us': float(p.get('center', 1500)),
+                'max_us':    float(p.get('max',    2500)),
+            })
+            sc += 2 if is_16bit else 1
+        self._thread = threading.Thread(target=self._worker, daemon=True,
+                                        name='OverlayWriter')
+        self._thread.start()
+
+    def _send_one(self, conn, fpp_ch: int, body: str):
         try:
-            import smbus2
-            self._bus = smbus2.SMBus(bus_num)
-            self._wake()
-            self._freq = self._actual_freq()
-        except Exception as exc:
-            print(f'[Capture] PCA9685 unavailable: {exc}')
+            if conn is None:
+                conn = http.client.HTTPConnection('127.0.0.1', 32322, timeout=0.1)
+            conn.request('PUT', f'/overlays/range/{fpp_ch}', body,
+                         {'Content-Type': 'application/json'})
+            conn.getresponse().read()
+        except Exception:
+            try:
+                conn.close()
+            except Exception:
+                pass
+            conn = None
+        return conn
 
-    def _wake(self):
-        m = self._bus.read_byte_data(self._addr, 0x00)
-        if m & 0x10:
-            self._bus.write_byte_data(self._addr, 0x00, m & ~0x10)
-            time.sleep(0.005)
+    def _worker(self):
+        conn = None
+        while self._running:
+            self._event.wait(timeout=1.0)
+            self._event.clear()
+            with self._plock:
+                batch = list(self._pending.items())
+                self._pending.clear()
+            for fpp_ch, body in batch:
+                conn = self._send_one(conn, fpp_ch, body)
+        if conn:
+            try:
+                conn.close()
+            except Exception:
+                pass
 
-    def _actual_freq(self) -> float:
-        pre = self._bus.read_byte_data(self._addr, 0xFE)
-        return 25_000_000 / (4096 * (pre + 1))
-
-    def _us_to_counts(self, us: int) -> int:
-        return round(us * self._freq * 4096 / 1_000_000)
+    def _us_to_fpp_val(self, us: float, port: dict) -> int:
+        mn, ctr, mx = port['min_us'], port['center_us'], port['max_us']
+        if port['is_16bit']:
+            if us <= ctr:
+                val = round((us - mn) / max(1, ctr - mn) * 32767)
+            else:
+                val = 32768 + round((us - ctr) / max(1, mx - ctr) * 32767)
+            return max(1, min(65535, val))
+        else:
+            if us <= ctr:
+                val = round((us - mn) / max(1, ctr - mn) * 127)
+            else:
+                val = 128 + round((us - ctr) / max(1, mx - ctr) * 127)
+            return max(1, min(255, val))
 
     def set_channels(self, commands: list):
-        if not self._bus:
-            return
-        for port, us in commands:
-            counts = self._us_to_counts(us)
-            base   = 0x06 + port * 4
-            self._bus.write_i2c_block_data(self._addr, base,
-                                           [0x00, 0x00, counts & 0xFF, counts >> 8])
+        """Queue commands and return immediately — background thread sends them."""
+        with self._plock:
+            for port_idx, us in commands:
+                if port_idx >= len(self._ports):
+                    continue
+                port    = self._ports[port_idx]
+                fpp_val = self._us_to_fpp_val(us, port)
+                fpp_ch  = port['fpp_ch']
+                if port['is_16bit']:
+                    self._pending[fpp_ch]     = f'{{"Value": {(fpp_val >> 8) & 0xFF}}}'
+                    self._pending[fpp_ch + 1] = f'{{"Value": {fpp_val & 0xFF}}}'
+                else:
+                    self._pending[fpp_ch] = f'{{"Value": {fpp_val}}}'
+        self._event.set()
+
+    def clear_channels(self):
+        """Remove all overlay overrides synchronously so fppd resumes immediately."""
+        with self._plock:
+            self._pending.clear()
+        conn = None
+        for port in self._ports:
+            fpp_ch = port['fpp_ch']
+            for ch in ([fpp_ch, fpp_ch + 1] if port['is_16bit'] else [fpp_ch]):
+                conn = self._send_one(conn, ch, '{"delete": true}')
+        if conn:
+            try:
+                conn.close()
+            except Exception:
+                pass
+
+    def close(self):
+        self._running = False
+        self._event.set()
+        self._thread.join(timeout=1.0)
 
 def _load_cfg() -> dict:
     if CFG_PATH.exists():
@@ -335,34 +382,8 @@ class CaptureDaemon:
         self._capture  = MotionCaptureMode(servos, cc)
         self._mapper  = JointMapper(self.cfg.get('joint_map', {}),
                                     self.cfg.get('pca_output_idx', 0))
-        # Only open smbus2 when live_output is active — avoids conflicting with fppd
-        self._writer  = None
-        if self.cfg.get('live_output', False):
-            self._open_live_output()
-
-    def _open_live_output(self):
-        """Disable fppd's PCA9685 output and open smbus2. Retries until Apache is up."""
-        for attempt in range(15):
-            if _set_fpp_pca9685_output(False):
-                break
-            print(f'[Capture] Waiting for FPP API (attempt {attempt + 1}/15)...')
-            time.sleep(4)
-        else:
-            print('[Capture] ERROR: could not disable FPP PCA9685 output.', flush=True)
-            return
-        time.sleep(0.5)
         out = self._mapper._out
-        self._writer = PCA9685Writer(out) if out else None
-
-    def _close_live_output(self):
-        """Close smbus2 and immediately re-enable fppd's PCA9685 output."""
-        if self._writer and self._writer._bus:
-            try:
-                self._writer._bus.close()
-            except Exception:
-                pass
-        self._writer = None
-        _set_fpp_pca9685_output(True)
+        self._writer = OverlayWriter(out) if out else None
 
     def _start_camera_thread(self):
         if not self._camera.start():
@@ -381,7 +402,7 @@ class CaptureDaemon:
                 vals = self._capture.update(result)
                 self._values = vals
                 cmds = self._mapper.compute(vals)
-            if cmds and self.cfg.get('live_output'):
+            if cmds and self.cfg.get('live_output') and not self._pb_playing:
                 cmds = self._smooth_servos(cmds)
                 if self._writer:
                     self._writer.set_channels(cmds)
@@ -628,43 +649,66 @@ class CaptureDaemon:
         self._pb_pause.clear()
         self._pb_playing = False
         self._stop_audio()
+        if self._writer:
+            self._writer.clear_channels()
 
     def _playback_loop(self, frames, start_idx: int = 0,
                        speed: float = 1.0, loop: bool = False):
-        cur_idx = start_idx
+        # Pre-compute timestamp list and joint key list for fast interpolation
+        ts   = [f.timestamp for f in frames]
+        keys = list(frames[0].values.keys())
+        n    = len(frames)
+        # Output at 50 Hz regardless of recording frame rate so servos are smooth
+        # even when the camera only captured 10-20 fps during recording.
+        step = 0.020
+
+        cur_t = ts[max(0, min(start_idx, n - 1))]
         while True:
-            wall_start  = time.time() - frames[cur_idx].timestamp / speed
-            pause_since = None
-            total       = len(frames)
-            for i in range(cur_idx, total):
-                frame = frames[i]
+            wall_start = time.time() - cur_t / speed
+
+            while cur_t <= ts[-1]:
                 if self._pb_stop.is_set():
                     break
-                while self._pb_pause.is_set() and not self._pb_stop.is_set():
-                    if pause_since is None:
-                        pause_since = time.time()
-                    time.sleep(0.02)
-                if pause_since is not None:
-                    wall_start += time.time() - pause_since
-                    pause_since = None
-                if self._pb_stop.is_set():
-                    break
-                target = wall_start + frame.timestamp / speed
+                if self._pb_pause.is_set():
+                    while self._pb_pause.is_set() and not self._pb_stop.is_set():
+                        time.sleep(0.02)
+                    if self._pb_stop.is_set():
+                        break
+                    # Re-anchor timing from scratch so resume is always clean
+                    wall_start = time.time() - cur_t / speed
+
+                target = wall_start + cur_t / speed
                 wait   = target - time.time()
                 if wait > 0:
                     time.sleep(wait)
                 if self._pb_stop.is_set():
                     break
-                self._capture.play_frame(frame.values)
-                self._pb_pos = i
-                cmds = self._mapper.compute(frame.values)
-                if cmds and self.cfg.get('live_output'):
-                    cmds = self._smooth_servos(cmds)
-                    if self._writer:
-                        self._writer.set_channels(cmds)
+
+                # Binary-search for the two recorded frames that bracket cur_t,
+                # then linearly interpolate all joint values between them.
+                hi = min(n - 1, bisect.bisect_right(ts, cur_t))
+                lo = max(0, hi - 1)
+                if lo == hi or ts[hi] <= ts[lo]:
+                    interp = frames[lo].values
+                else:
+                    alpha  = (cur_t - ts[lo]) / (ts[hi] - ts[lo])
+                    lo_v   = frames[lo].values
+                    hi_v   = frames[hi].values
+                    interp = {k: lo_v.get(k, 0.0) + alpha * (hi_v.get(k, 0.0) - lo_v.get(k, 0.0))
+                              for k in keys}
+
+                self._pb_pos = lo
+                self._capture.play_frame(interp)
+                cmds = self._mapper.compute(interp)
+                if cmds and self._writer:
+                    self._writer.set_channels(cmds)
+
+                cur_t += step * speed
+
             if self._pb_stop.is_set() or not loop:
                 break
-            cur_idx = 0   # loop: restart from the beginning
+            cur_t = ts[0]
+
         self._pb_playing = False
         self._pb_stop.clear()
 
@@ -875,10 +919,8 @@ def api_pb_seek():
     frame = frames[idx]
     daemon._capture.play_frame(frame.values)
     cmds = daemon._mapper.compute(frame.values)
-    if cmds and daemon.cfg.get('live_output'):
-        cmds = daemon._smooth_servos(cmds)
-        if daemon._writer:
-            daemon._writer.set_channels(cmds)
+    if cmds and daemon._writer:
+        daemon._writer.set_channels(cmds)
     return jsonify({'ok': True, 'frame': idx,
                     'timestamp': round(frame.timestamp, 2)})
 
@@ -990,14 +1032,16 @@ def api_set_cfg():
         daemon._mapper.reload(daemon.cfg.get('joint_map', {}),
                               daemon.cfg.get('pca_output_idx', 0))
         out = daemon._mapper._out
-        daemon._writer = PCA9685Writer(out) if out else None
+        if daemon._writer:
+            daemon._writer.close()
+        daemon._writer = OverlayWriter(out) if out else None
     if 'live_output' in updates:
         new_live = daemon.cfg.get('live_output', False)
         if new_live and not prev_live:
             daemon._servo_last.clear()
-            daemon._open_live_output()
         elif not new_live and prev_live:
-            daemon._close_live_output()
+            if daemon._writer:
+                daemon._writer.clear_channels()
     return jsonify({'ok': True})
 
 @app.route('/api/camera/release', methods=['POST'])
@@ -1025,8 +1069,9 @@ def stream():
 
 
 def _shutdown(sig, frame):
-    if daemon.cfg.get('live_output', False):
-        daemon._close_live_output()
+    if daemon._writer:
+        daemon._writer.clear_channels()
+        daemon._writer.close()
     sys.exit(0)
 
 

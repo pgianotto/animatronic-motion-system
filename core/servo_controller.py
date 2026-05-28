@@ -71,10 +71,8 @@ class Smbus2ServoBackend(ServoBackend):
         pulse_us = 1000.0 + (float(angle) / 180.0) * 1000.0
         counts   = round(pulse_us * self._freq * 4096 / 1_000_000)
         base = 0x06 + channel * 4
-        self._bus.write_byte_data(self._addr, base,   0)
-        self._bus.write_byte_data(self._addr, base+1, 0)
-        self._bus.write_byte_data(self._addr, base+2, counts & 0xFF)
-        self._bus.write_byte_data(self._addr, base+3, counts >> 8)
+        self._bus.write_i2c_block_data(self._addr, base,
+                                       [0x00, 0x00, counts & 0xFF, counts >> 8])
 
     def close(self):
         self._bus.close()
