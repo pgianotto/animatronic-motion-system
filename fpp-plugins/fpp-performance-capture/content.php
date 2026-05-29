@@ -181,22 +181,34 @@ $step_time_ms = intval($cfg['step_time_ms'] ?? 50);
 
 <!-- Live Output control ─────────────────────────────────────────────────── -->
 <div class="pc-card">
-  <h3>Live Output</h3>
-  <div class="live-toggle-card">
-    <div class="live-desc">
-      <p>
-        Drives the mapped servos in real-time from the camera feed.
-        Enable here, then move in front of the camera — the joints table below
-        shows live values and the servos should follow.
-        Turn off before recording to avoid servo noise in the timeline.
-      </p>
+  <div style="display:flex; gap:14px; align-items:flex-start;">
+
+    <!-- Small camera preview -->
+    <div style="width:220px; flex-shrink:0;">
+      <div class="cam-container" style="border-radius:6px;">
+        <img id="map-test-stream" src="/fpp-capture-api/stream" class="pc-stream"
+             onerror="this.style.display='none'" alt="">
+      </div>
     </div>
-    <button id="btn-live"
-            class="pc-btn btn-live-main <?= ($cfg['live_output'] ?? false) ? 'btn-live-on' : 'btn-live-off' ?>"
-            onclick="toggleLive()">
-      <?= ($cfg['live_output'] ?? false) ? '⏹ Live ON' : '⏵ Enable Live Output' ?>
-    </button>
-  </div>
+
+    <!-- Live Output toggle + values -->
+    <div style="flex:1; min-width:0;">
+      <h3>Live Output</h3>
+      <div class="live-toggle-card">
+        <div class="live-desc">
+          <p>
+            Drives the mapped servos in real-time from the camera feed.
+            Enable here, then move in front of the camera — the preview shows
+            tracking and the joints table below confirms each value responds.
+            Turn off before recording to avoid servo noise in the timeline.
+          </p>
+        </div>
+        <button id="btn-live"
+                class="pc-btn btn-live-main <?= ($cfg['live_output'] ?? false) ? 'btn-live-on' : 'btn-live-off' ?>"
+                onclick="toggleLive()">
+          <?= ($cfg['live_output'] ?? false) ? '⏹ Live ON' : '⏵ Enable Live Output' ?>
+        </button>
+      </div>
 
   <!-- Live values visible here so user can confirm tracking while tuning -->
   <div style="margin-top:14px; padding-top:12px; border-top:1px solid var(--div);">
@@ -227,7 +239,9 @@ $step_time_ms = intval($cfg['step_time_ms'] ?? 50);
       </div>
     </div>
   </div>
-</div>
+    </div><!-- /right col -->
+  </div><!-- /outer flex row -->
+</div><!-- /live output card -->
 
 <!-- Joint Mapping ───────────────────────────────────────────────────────── -->
 <div class="pc-card">
@@ -322,7 +336,7 @@ $step_time_ms = intval($cfg['step_time_ms'] ?? 50);
   <!-- Camera feed -->
   <div class="pc-card" style="flex:2; min-width:0; padding:0; overflow:hidden;">
     <div class="cam-container">
-      <img src="/fpp-capture-api/stream" class="pc-stream"
+      <img id="rec-stream" class="pc-stream"
            onerror="this.style.display='none'" alt="">
       <div style="position:absolute; top:10px; left:10px;">
         <span class="pc-badge <?= $recording ? 'badge-rec' : 'badge-idle' ?>" id="badge-rec">
@@ -540,11 +554,18 @@ let JM_ports = [];
 let JM_built  = false;
 
 // ── Tab switching ─────────────────────────────────────────────────────────────
+const STREAM_URL = API + '/stream';
+
 function switchTab(name) {
   document.querySelectorAll('.pc-tab').forEach(t =>
     t.classList.toggle('active', t.dataset.tab === name));
   document.querySelectorAll('.pc-tabpanel').forEach(p =>
     p.classList.toggle('active', p.id === 'tab-' + name));
+  // Only keep one MJPEG connection open at a time
+  const mapImg = document.getElementById('map-test-stream');
+  const recImg = document.getElementById('rec-stream');
+  if (mapImg) mapImg.src = (name === 'map-test') ? STREAM_URL : '';
+  if (recImg) recImg.src = (name === 'record')   ? STREAM_URL : '';
 }
 
 // ── Process step highlight ────────────────────────────────────────────────────
@@ -1421,6 +1442,9 @@ function restoreLiveFollow() {
 }
 
 // ── Init ──────────────────────────────────────────────────────────────────────
+// Tab 1 is active by default — start its stream, leave Record's blank
+document.getElementById('map-test-stream').src = STREAM_URL;
+
 WF.load();
 loadMediaFiles();
 loadAudioDevices();
