@@ -247,7 +247,11 @@ $step_time_ms = intval($cfg['step_time_ms'] ?? 50);
 <div class="pc-card">
   <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:6px;">
     <h3 style="margin:0;">Joint → Servo Mapping</h3>
-    <button class="pc-btn btn-ghost btn-sm" onclick="saveJointMap()">Save Mapping</button>
+    <div style="display:flex; gap:8px; align-items:center;">
+      <button class="pc-btn btn-ghost btn-sm" onclick="testServoOutput()" title="Send center values to all configured servo ports">▶ Test Servos</button>
+      <span id="jm-test-msg" class="pc-msg" style="margin:0;"></span>
+      <button class="pc-btn btn-ghost btn-sm" onclick="saveJointMap()">Save Mapping</button>
+    </div>
   </div>
   <p class="pc-hint">
     Assign each tracked joint to a servo port.
@@ -418,6 +422,15 @@ $step_time_ms = intval($cfg['step_time_ms'] ?? 50);
      Scrub through the recording, edit curves, then export for xLights.
      ══════════════════════════════════════════════════════════════════════ -->
 <div class="pc-tabpanel" id="tab-review">
+
+<!-- Servo output warning (shown when writer_ok=false or no joints mapped) ── -->
+<div id="servo-warn" class="pc-card" style="display:none; border:1px solid var(--amber); padding:10px 18px; margin-bottom:14px;">
+  <div style="display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:10px;">
+    <div id="servo-warn-text" style="color:var(--amber); font-size:12px; flex:1;"></div>
+    <button class="pc-btn btn-ghost btn-sm" onclick="testServoOutput()">▶ Test Servo Output</button>
+  </div>
+  <div id="servo-test-msg" class="pc-msg" style="margin-top:4px;"></div>
+</div>
 
 <!-- Current session info ────────────────────────────────────────────────── -->
 <div class="pc-card" style="padding:12px 18px; margin-bottom:14px;">
@@ -1337,6 +1350,35 @@ function showMsg(msg, ok=true) {
   setTimeout(() => el.textContent='', 5000);
 }
 
+// ── Servo test ────────────────────────────────────────────────────────────────
+function testServoOutput() {
+  ['servo-test-msg', 'jm-test-msg'].forEach(id => {
+    const el = document.getElementById(id);
+    if (el) { el.style.color = '#888'; el.textContent = 'Testing…'; }
+  });
+  fetch(API + '/api/servo/test', {method: 'POST'})
+    .then(r => r.json())
+    .then(d => {
+      const msg   = d.ok ? `✓ Center sent to ${d.ports} port(s)` : '✗ ' + d.error;
+      const color = d.ok ? '#06d6a0' : '#e63946';
+      ['servo-test-msg', 'jm-test-msg'].forEach(id => {
+        const el = document.getElementById(id);
+        if (el) { el.style.color = color; el.textContent = msg; }
+      });
+      setTimeout(() => {
+        ['servo-test-msg', 'jm-test-msg'].forEach(id => {
+          const el = document.getElementById(id);
+          if (el) el.textContent = '';
+        });
+      }, 5000);
+    }).catch(() => {
+      ['servo-test-msg', 'jm-test-msg'].forEach(id => {
+        const el = document.getElementById(id);
+        if (el) { el.style.color = '#e63946'; el.textContent = '✗ Daemon unreachable'; }
+      });
+    });
+}
+
 // ── Export ────────────────────────────────────────────────────────────────────
 function exportFseq() {
   const name    = (document.getElementById('fseq-name').value.trim() || 'capture') + '.fseq';
@@ -1452,6 +1494,21 @@ function pollStatus() {
 
     const ownerCard = document.getElementById('cam-ownership-card');
     if (ownerCard) ownerCard.style.display = s.cam_running ? 'none':'';
+
+    // Servo output health warning in Review tab
+    const warn = document.getElementById('servo-warn');
+    const warnText = document.getElementById('servo-warn-text');
+    if (warn && warnText && s.writer_ok !== undefined) {
+      if (!s.writer_ok) {
+        warnText.textContent = '⚠ Servo output not ready — co-other.json not found or pca_output_idx is wrong. Check FPP has a PCA9685 controller configured and save the mapping.';
+        warn.style.display = '';
+      } else if (s.joint_map_count === 0) {
+        warnText.textContent = '⚠ No joints are mapped to servo ports. Go to the Map & Test tab, assign joints to ports, then click Save Mapping.';
+        warn.style.display = '';
+      } else {
+        warn.style.display = 'none';
+      }
+    }
   }).catch(()=>{});
 }
 

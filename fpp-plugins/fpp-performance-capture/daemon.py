@@ -110,6 +110,29 @@ def _load_co_other(out_idx: int) -> dict | None:
         return None
 
 
+def _ensure_fpp_output_enabled():
+    """Re-enable FPP's PCA9685 channel output if it was left disabled."""
+    try:
+        conn = http.client.HTTPConnection('localhost', 80, timeout=3)
+        conn.request('GET', '/api/channel/output/co-other')
+        resp = conn.getresponse()
+        cfg  = json.loads(resp.read())
+        changed = False
+        for out in cfg.get('channelOutputs', []):
+            if out.get('type') == 'PCA9685' and not out.get('enabled', 1):
+                out['enabled'] = 1
+                changed = True
+        if changed:
+            data = json.dumps(cfg).encode()
+            conn.request('POST', '/api/channel/output/co-other', data,
+                         {'Content-Type': 'application/json'})
+            conn.getresponse().read()
+            print('[Capture] Re-enabled FPP PCA9685 channel output.', flush=True)
+        conn.close()
+    except Exception as exc:
+        print(f'[Capture] Could not verify FPP output state: {exc}', flush=True)
+
+
 class JointMapper:
     """Maps tracked joint values → servo µs using co-other.json calibration."""
 
@@ -208,12 +231,17 @@ class OverlayWriter:
             conn.request('PUT', f'/overlays/range/{fpp_ch}', body,
                          {'Content-Type': 'application/json'})
             conn.getresponse().read()
-        except Exception:
+        except Exception as exc:
+            if not getattr(self, '_overlay_err_logged', False):
+                self._overlay_err_logged = True
+                print(f'[Capture] Overlay API PUT ch={fpp_ch} failed: {exc}', flush=True)
             try:
                 conn.close()
             except Exception:
                 pass
             conn = None
+        else:
+            self._overlay_err_logged = False
         return conn
 
     def _worker(self):
@@ -633,6 +661,17 @@ class CaptureDaemon:
         self._pb_pause.clear()
         self._pb_playing = True
         self._pb_pos     = start_idx
+
+        # Re-init writer if co-other.json became available since startup
+        if self._writer is None:
+            self._mapper.reload(self.cfg.get('joint_map', {}),
+                                self.cfg.get('pca_output_idx', 0))
+            out = self._mapper._out
+            if out:
+                self._writer = OverlayWriter(out)
+                print('[Capture] Overlay writer initialized on playback start.', flush=True)
+        _ensure_fpp_output_enabled()
+
         self._pb_thread  = threading.Thread(
             target=self._playback_loop,
             args=(frames, start_idx, self._pb_speed, self._pb_loop),
@@ -669,6 +708,7 @@ class CaptureDaemon:
         # Output at 50 Hz regardless of recording frame rate so servos are smooth
         # even when the camera only captured 10-20 fps during recording.
         step = 0.020
+        _diag_done = False
 
         cur_t = ts[max(0, min(start_idx, n - 1))]
         while True:
@@ -708,6 +748,11 @@ class CaptureDaemon:
                 self._pb_pos = lo
                 self._capture.play_frame(interp)
                 cmds = self._mapper.compute(interp)
+                if not _diag_done:
+                    _diag_done = True
+                    print(f'[Capture] playback: joint_map={len(self._mapper._map)} '
+                          f'out={self._mapper._out is not None} '
+                          f'writer={self._writer is not None} cmds={len(cmds)}', flush=True)
                 if cmds and self._writer:
                     self._writer.set_channels(cmds)
 
@@ -841,9 +886,11 @@ class CaptureDaemon:
             'joint_map':    self.cfg.get('joint_map', {}),
             'ports':        self._mapper.port_info(),
             'live_output':  self.cfg.get('live_output', False),
-            'audio_file':   self.cfg.get('audio_file', ''),
-            'audio_output': self.cfg.get('audio_output', 'browser'),
-            'cam_running':  getattr(self, '_cam_running', False),
+            'audio_file':      self.cfg.get('audio_file', ''),
+            'audio_output':    self.cfg.get('audio_output', 'browser'),
+            'cam_running':     getattr(self, '_cam_running', False),
+            'writer_ok':       self._writer is not None,
+            'joint_map_count': len(self.cfg.get('joint_map', {})),
         }
 
     def mjpeg_frames(self):
@@ -951,6 +998,26 @@ def api_pb_pause():
 def api_pb_stop():
     daemon.stop_playback()
     return jsonify({'ok': True})
+
+
+@app.route('/api/servo/test', methods=['POST'])
+def api_servo_test():
+    """Send center position to all configured servo ports via the overlay API."""
+    out = daemon._mapper._out
+    if not out:
+        return jsonify({'ok': False,
+                        'error': 'No servo output — check co-other.json and pca_output_idx setting'})
+    _ensure_fpp_output_enabled()
+    if daemon._writer is None:
+        daemon._writer = OverlayWriter(out)
+    ports = out.get('ports', [])
+    if not ports:
+        return jsonify({'ok': False, 'error': 'No ports in servo output config'})
+    cmds = [(i, float(p.get('center', 1500))) for i, p in enumerate(ports)]
+    daemon._writer.set_channels(cmds)
+    return jsonify({'ok': True, 'ports': len(ports),
+                    'joint_map_count': len(daemon.cfg.get('joint_map', {}))})
+
 
 @app.route('/api/export', methods=['POST'])
 def api_export():
