@@ -1,11 +1,12 @@
 """FSEQ v2.0 writer for xLights / FPP.
 
 Generates uncompressed FSEQ files from recorded motion capture frames.
-Servo positions are written as 2-byte little-endian µs values at the FPP
-channel offsets defined in co-other.json (startChannel + port * 2).
 
-xLights can import the file and map each 2-channel pair to a Servo model
-using the FPP channel numbers reported after export.
+Channel value encoding (matches FPP's PCA9685 channel output expectations):
+  dataType=0 (8-bit):  1 byte, 0-255 linear across min..max µs
+  dataType=2 (16-bit): 2 bytes, FPP SCALED format, stored big-endian
+                        0=zeroBehavior, 1..32767=min..center, 32768..65535=center..max
+                        High byte at lower channel index (matching overlay range API)
 
 Format reference: https://github.com/FalconChristmas/fpp/blob/master/docs/FSEQ_Sequence_File_Format.txt
 """
@@ -92,8 +93,9 @@ def export_fseq_servo(
         ctr = max(mn, min(mx, p.get('center', (mn + mx) // 2)))
         ch  = port_offsets[pi]
         if port_sizes[pi] == 2:
-            frame_data[:, ch]     = ctr & 0xFF
-            frame_data[:, ch + 1] = (ctr >> 8) & 0xFF
+            # Center in FPP SCALED = 32767; stored big-endian (high byte first)
+            frame_data[:, ch]     = 0x7F   # high byte of 32767 = 0x7FFF
+            frame_data[:, ch + 1] = 0xFF   # low byte
         else:
             val = round((ctr - mn) / max(1, mx - mn) * 255)
             frame_data[:, ch] = max(0, min(255, val))
@@ -103,15 +105,16 @@ def export_fseq_servo(
         port_idx = int(mapping.get('port', -1))
         if port_idx < 0 or port_idx >= n_ports:
             continue
-        p      = ports[port_idx]
-        mn     = p.get('min',    500)
-        mx     = p.get('max',   2500)
-        lo, hi = NORM_RANGE.get(joint_key, (0, 1))
-        scale  = float(mapping.get('scale',  1.0))
-        invert = bool(mapping.get('invert', False))
-        raw    = [f.values.get(joint_key, (lo + hi) / 2) for f in frames]
-        ch     = port_offsets[port_idx]
-        size   = port_sizes[port_idx]
+        p        = ports[port_idx]
+        mn       = p.get('min',    500)
+        mx       = p.get('max',   2500)
+        ctr_port = p.get('center', (mn + mx) // 2)
+        lo, hi   = NORM_RANGE.get(joint_key, (0, 1))
+        scale    = float(mapping.get('scale',  1.0))
+        invert   = bool(mapping.get('invert', False))
+        raw      = [f.values.get(joint_key, (lo + hi) / 2) for f in frames]
+        ch       = port_offsets[port_idx]
+        size     = port_sizes[port_idx]
 
         for i in range(num_frames):
             t      = i * step_time_ms / 1000.0
@@ -123,8 +126,15 @@ def export_fseq_servo(
             t2 = max(0.0, min(1.0, t2))
             us = max(mn, min(mx, round(mn + t2 * (mx - mn))))
             if size == 2:
-                frame_data[i, ch]     = us & 0xFF
-                frame_data[i, ch + 1] = (us >> 8) & 0xFF
+                # FPP SCALED: 1..32767 = min..center, 32768..65535 = center..max
+                # Stored big-endian (high byte at lower channel index)
+                if us <= ctr_port:
+                    val = round((us - mn) / max(1, ctr_port - mn) * 32767)
+                else:
+                    val = 32768 + round((us - ctr_port) / max(1, mx - ctr_port) * 32767)
+                val = max(1, min(65535, val))
+                frame_data[i, ch]     = (val >> 8) & 0xFF
+                frame_data[i, ch + 1] = val & 0xFF
             else:
                 val = round((us - mn) / max(1, mx - mn) * 255)
                 frame_data[i, ch] = max(0, min(255, val))
