@@ -153,13 +153,21 @@ class JointMapper:
         if not self._out:
             return []
         start_ch = int(self._out.get('startChannel', 1))
-        return [
-            {'port': i, 'desc': p.get('description', f'Port {i}'),
-             'min': p.get('min', 500), 'max': p.get('max', 2500),
-             'center': p.get('center', 1500),
-             'fpp_channel': start_ch + i * 2}
-            for i, p in enumerate(self._out.get('ports', []))
-        ]
+        result = []
+        fpp_ch = start_ch
+        for i, p in enumerate(self._out.get('ports', [])):
+            size = 2 if p.get('dataType', 0) == 2 else 1
+            result.append({
+                'port': i,
+                'desc': p.get('description', f'Port {i}'),
+                'min': p.get('min', 500),
+                'max': p.get('max', 2500),
+                'center': p.get('center', 1500),
+                'fpp_channel': fpp_ch,
+                'data_type': p.get('dataType', 0),
+            })
+            fpp_ch += size
+        return result
 
 
 class OverlayWriter:

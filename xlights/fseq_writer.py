@@ -51,8 +51,9 @@ def export_fseq_servo(
 ) -> tuple:
     """Write servo FSEQ compatible with FPP and xLights.
 
-    Channel layout: 2 bytes per servo port (16-bit little-endian µs value),
-    starting at co_other_out['startChannel'] (1-indexed, converted internally).
+    Channel layout respects each port's dataType:
+      dataType=2 (16-bit): 2 bytes per port as little-endian µs value
+      dataType=0 (8-bit):  1 byte per port as 0-255 scale (0=min, 255=max)
 
     Unmapped ports are filled with their calibrated center value.
 
@@ -62,13 +63,21 @@ def export_fseq_servo(
     if not frames:
         raise ValueError("No frames to export — record a performance first.")
 
-    ports    = co_other_out.get('ports', [])
+    ports = co_other_out.get('ports', [])
     if not ports:
         raise ValueError("No servo ports found in output config.")
 
-    start_ch  = int(co_other_out.get('startChannel', 1)) - 1   # 0-indexed in FSEQ
-    n_ports   = len(ports)
-    ch_count  = start_ch + n_ports * 2
+    start_ch = int(co_other_out.get('startChannel', 1)) - 1   # 0-indexed in FSEQ
+    n_ports  = len(ports)
+
+    # Per-port byte width: dataType=2 → 16-bit (2 bytes), otherwise 8-bit (1 byte)
+    port_sizes   = [2 if p.get('dataType', 0) == 2 else 1 for p in ports]
+    port_offsets = []
+    off = start_ch
+    for sz in port_sizes:
+        port_offsets.append(off)
+        off += sz
+    ch_count = off
 
     total_ms   = frames[-1].timestamp * 1000.0
     num_frames = max(1, int(total_ms / step_time_ms))
@@ -81,9 +90,13 @@ def export_fseq_servo(
         mn  = p.get('min',    500)
         mx  = p.get('max',   2500)
         ctr = max(mn, min(mx, p.get('center', (mn + mx) // 2)))
-        ch  = start_ch + pi * 2
-        frame_data[:, ch]     = ctr & 0xFF
-        frame_data[:, ch + 1] = (ctr >> 8) & 0xFF
+        ch  = port_offsets[pi]
+        if port_sizes[pi] == 2:
+            frame_data[:, ch]     = ctr & 0xFF
+            frame_data[:, ch + 1] = (ctr >> 8) & 0xFF
+        else:
+            val = round((ctr - mn) / max(1, mx - mn) * 255)
+            frame_data[:, ch] = max(0, min(255, val))
 
     # Overlay each mapped joint
     for joint_key, mapping in joint_map.items():
@@ -97,7 +110,8 @@ def export_fseq_servo(
         scale  = float(mapping.get('scale',  1.0))
         invert = bool(mapping.get('invert', False))
         raw    = [f.values.get(joint_key, (lo + hi) / 2) for f in frames]
-        ch     = start_ch + port_idx * 2
+        ch     = port_offsets[port_idx]
+        size   = port_sizes[port_idx]
 
         for i in range(num_frames):
             t      = i * step_time_ms / 1000.0
@@ -108,8 +122,12 @@ def export_fseq_servo(
                 t2 = 1.0 - t2
             t2 = max(0.0, min(1.0, t2))
             us = max(mn, min(mx, round(mn + t2 * (mx - mn))))
-            frame_data[i, ch]     = us & 0xFF
-            frame_data[i, ch + 1] = (us >> 8) & 0xFF
+            if size == 2:
+                frame_data[i, ch]     = us & 0xFF
+                frame_data[i, ch + 1] = (us >> 8) & 0xFF
+            else:
+                val = round((us - mn) / max(1, mx - mn) * 255)
+                frame_data[i, ch] = max(0, min(255, val))
 
     _write_v2(output_path, frame_data, ch_count, num_frames, step_time_ms)
     return num_frames, ch_count, int(co_other_out.get('startChannel', 1))

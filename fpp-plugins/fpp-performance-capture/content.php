@@ -478,13 +478,10 @@ $step_time_ms = intval($cfg['step_time_ms'] ?? 50);
 
 <!-- Export ──────────────────────────────────────────────────────────────── -->
 <div class="pc-card">
-  <h3>Export for xLights</h3>
-  <p class="pc-hint">
-    Exports a paired <code>.xsq</code> + <code>.fseq</code> bundle.
-    Copy both files to your xLights sequences folder, then open the <code>.xsq</code>.
-  </p>
+  <h3>Export</h3>
 
-  <div class="pc-field" style="margin-bottom:14px;">
+  <!-- Shared frame-rate selector -->
+  <div class="pc-field" style="margin-bottom:16px;">
     <span class="pc-label">Frame Rate</span>
     <div class="fps-seg">
       <input type="radio" name="fps" id="fps-20" value="50"   <?= $step_time_ms == 50 ? 'checked' : '' ?>>
@@ -502,22 +499,44 @@ $step_time_ms = intval($cfg['step_time_ms'] ?? 50);
     <span id="fps-label" style="color:#555; font-size:11px;"></span>
   </div>
 
-  <div class="pc-field">
-    <span class="pc-label">Base name</span>
-    <input class="pc-input" id="xsq-name" value="capture" style="width:180px;" placeholder="no extension">
-    <button class="pc-btn btn-export" onclick="exportXlights()">Export for xLights</button>
+  <!-- FPP Direct Export (primary) -->
+  <div style="margin-bottom:20px;">
+    <div style="font-weight:bold; color:var(--cyan); font-size:12px; margin-bottom:6px;">
+      EXPORT FOR FPP (RECOMMENDED)
+    </div>
+    <p class="pc-hint" style="margin-bottom:10px;">
+      Saves an FSEQ directly to FPP's sequences folder. No xLights needed —
+      go to FPP&rsquo;s scheduler and add the file to play it.
+    </p>
+    <div class="pc-field">
+      <span class="pc-label">Filename</span>
+      <input class="pc-input" id="fseq-name" value="capture" style="width:180px;" placeholder="no extension">
+      <button class="pc-btn btn-export" onclick="exportFseq()">Export FSEQ for FPP</button>
+    </div>
+    <div id="fseq-msg" class="pc-msg"></div>
+    <div id="fseq-ch-map" style="display:none; margin-top:10px; padding:10px;
+         background:var(--dark); border-radius:5px; border:1px solid #1a2a4a;">
+      <div style="color:var(--cyan); font-weight:bold; font-size:11px; margin-bottom:6px;">FPP Channel Mapping</div>
+      <div id="fseq-ch-map-inner" style="font-size:11px; font-family:monospace;"></div>
+    </div>
   </div>
 
-  <div id="xsq-msg" class="pc-msg"></div>
-  <div id="xsq-downloads" style="display:none; gap:8px; flex-wrap:wrap; margin-top:8px;"></div>
-
-  <div id="export-xlights" style="display:none; margin-top:12px; padding:10px;
-       background:var(--dark); border-radius:5px; border:1px solid #1a2a4a;">
-    <div style="color:var(--cyan); font-weight:bold; font-size:11px; margin-bottom:6px;">Channel Mapping</div>
-    <div id="export-ch-map" style="font-size:11px; font-family:monospace;"></div>
-    <div style="color:#555; font-size:11px; margin-top:6px; padding-top:6px; border-top:1px solid #1a2a4a;">
-      In xLights: add a <strong style="color:var(--fg);">Servo</strong> model per port set to the channel pair above.
+  <div style="border-top:1px solid #1a2a4a; padding-top:16px;">
+    <div style="font-weight:bold; color:#555; font-size:12px; margin-bottom:6px;">
+      EXPORT FOR XLIGHTS (ADVANCED)
     </div>
+    <p class="pc-hint" style="margin-bottom:10px;">
+      Exports a paired <code>.xsq</code> + <code>.fseq</code> bundle.
+      Copy both files to your xLights sequences folder, then open the <code>.xsq</code>.
+      <strong style="color:#fb8500;">Do not upload back to FPP from xLights</strong> — use the FPP export above instead.
+    </p>
+    <div class="pc-field">
+      <span class="pc-label">Base name</span>
+      <input class="pc-input" id="xsq-name" value="capture" style="width:180px;" placeholder="no extension">
+      <button class="pc-btn btn-ghost" onclick="exportXlights()">Export for xLights</button>
+    </div>
+    <div id="xsq-msg" class="pc-msg"></div>
+    <div id="xsq-downloads" style="display:none; gap:8px; flex-wrap:wrap; margin-top:8px;"></div>
   </div>
 </div>
 
@@ -1317,6 +1336,35 @@ function showMsg(msg, ok=true) {
 }
 
 // ── Export ────────────────────────────────────────────────────────────────────
+function exportFseq() {
+  const name    = (document.getElementById('fseq-name').value.trim() || 'capture') + '.fseq';
+  const step_ms = getStepTimeMs();
+  const msg     = document.getElementById('fseq-msg');
+  const mapBox  = document.getElementById('fseq-ch-map');
+  const mapInner= document.getElementById('fseq-ch-map-inner');
+  msg.style.color='#888'; msg.textContent='Exporting…'; mapBox.style.display='none';
+  fetch(API+'/api/config', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({step_time_ms:step_ms})});
+  fetch(API+'/api/export', {method:'POST', headers:{'Content-Type':'application/json'},
+        body:JSON.stringify({filename:name, step_time_ms:step_ms})})
+    .then(r=>r.json()).then(d => {
+      if (d.ok) {
+        msg.style.color='#06d6a0';
+        msg.textContent=`✓ ${d.frames} frames · ${d.duration}s · ${d.channels} ch · Ready in FPP scheduler`;
+        if (JM_ports.length > 0) {
+          mapInner.innerHTML = JM_ports.map(p => {
+            const ch  = p.fpp_channel;
+            const ch2 = p.data_type === 2
+              ? `&ndash;<strong style="color:#4cc9f0;">${ch+1}</strong> (16-bit)` : ' (8-bit)';
+            return `<div style="padding:2px 0;">Port ${p.port} <span style="color:#e0e0e0;">${p.desc||''}</span>`
+              + ` &rarr; FPP ch <strong style="color:#4cc9f0;">${ch}</strong>${ch2}</div>`;
+          }).join('');
+          mapBox.style.display = 'block';
+        }
+        setStep(4);
+      } else { msg.style.color='#e63946'; msg.textContent='✗ '+d.error; }
+    });
+}
+
 function exportXlights() {
   const name    = document.getElementById('xsq-name').value.trim() || 'capture';
   const step_ms = getStepTimeMs();
@@ -1337,24 +1385,10 @@ function exportXlights() {
           dl.appendChild(a);
         });
         dl.style.display='flex';
-        showXLightsMap(d);
         setStep(4);
         if (d.xsq_error) { msg.textContent+='  (XSQ: '+d.xsq_error+')'; msg.style.color='#fb8500'; }
       } else { msg.style.color='#e63946'; msg.textContent='✗ '+d.error; }
     });
-}
-
-function showXLightsMap(d) {
-  const xl  = document.getElementById('export-xlights');
-  const map = document.getElementById('export-ch-map');
-  if (d.start_channel !== undefined && JM_ports.length > 0) {
-    map.innerHTML = JM_ports.map(p => {
-      const ch1 = d.start_channel + p.port*2, ch2 = ch1+1;
-      return `<div style="padding:2px 0;">Port ${p.port} <span style="color:#e0e0e0;">${p.desc||''}</span>
-        &rarr; xLights ch <strong style="color:#4cc9f0;">${ch1}</strong>&ndash;<strong style="color:#4cc9f0;">${ch2}</strong></div>`;
-    }).join('');
-    xl.style.display='block';
-  }
 }
 
 // ── Status poll ───────────────────────────────────────────────────────────────
