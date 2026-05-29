@@ -1,0 +1,32 @@
+name: Update plugin sha
+
+on:
+  push:
+    branches: [master]
+    paths-ignore:
+      - 'pluginInfo.json'
+
+permissions:
+  contents: write
+
+jobs:
+  update-sha:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Pin sha to pushed commit
+        run: |
+          SHA=$(git rev-parse HEAD)
+          jq --arg sha "$SHA" '.versions[0].sha = $sha' pluginInfo.json > tmp.json
+          mv tmp.json pluginInfo.json
+
+      - name: Commit and push
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add pluginInfo.json
+          git diff --staged --quiet || git commit -m "chore: pin plugin sha [skip ci]"
+          git push
