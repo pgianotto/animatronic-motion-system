@@ -527,8 +527,10 @@ $step_time_ms = intval($cfg['step_time_ms'] ?? 50);
     </div>
     <p class="pc-hint" style="margin-bottom:10px;">
       Exports a paired <code>.xsq</code> + <code>.fseq</code> bundle.
-      Copy both files to your xLights sequences folder, then open the <code>.xsq</code>.
-      <strong style="color:#fb8500;">Do not upload back to FPP from xLights</strong> — use the FPP export above instead.
+      Download <strong>both files</strong> to the same xLights sequences folder,
+      open the <code>.xsq</code>, add your lighting effects on other channels,
+      then upload to FPP. The servo channels are embedded as a data layer — no
+      model or controller setup needed in xLights.
     </p>
     <div class="pc-field">
       <span class="pc-label">Base name</span>

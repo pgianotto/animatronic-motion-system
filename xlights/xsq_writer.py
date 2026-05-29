@@ -108,7 +108,18 @@ def export_xsq(
     output_path: str,
     model_name: str = "DmxServo",
 ) -> str:
-    """Write an xLights 2026-format XSQ with one Servo+value-curve effect per joint."""
+    """Write an xLights 2026-format XSQ that embeds the servo FSEQ as a DataLayer.
+
+    The DataLayer carries pre-rendered channel data at absolute FPP channel
+    offsets, so xLights renders and uploads it correctly without requiring any
+    model or controller configuration in the xLights layout.  Servo effect
+    layers are also included so the timeline shows editable per-joint curves
+    for users who have a matching DmxServo model in their layout.
+
+    Workflow: download both the .xsq and .fseq to your xLights sequences
+    folder, open the .xsq, add lighting effects on other channels, then upload
+    to FPP — the servo channels are merged automatically.
+    """
     ports   = co_other_out.get('ports', []) if co_other_out else []
     n_ports = len(ports)
 
@@ -158,6 +169,12 @@ def export_xsq(
             layers.append((servo_num, desc, ref))
         model_layers[mdl] = layers
 
+    # DataLayer metadata — mirrors what fseq_writer.export_fseq_servo computes
+    dl_start_ch = int(co_other_out.get('startChannel', 1)) - 1 if co_other_out else 0
+    dl_ch_count = dl_start_ch + sum(
+        2 if p.get('dataType', 0) == 2 else 1 for p in ports
+    )
+
     lines = [
         '<?xml version="1.0"?>',
         '<xsequence BaseChannel="0" ChanCtrlBasic="0" ChanCtrlColor="0" FixedPointTiming="1" ModelBlending="true">',
@@ -188,8 +205,12 @@ def export_xsq(
         '  </EffectDB>',
         '  <SequenceMedia />',
         '  <DataLayers>',
-        '    <DataLayer lor_params="0" channel_offset="0" num_channels="0" num_frames="0" '
-        'data="&lt;rendered: erase-mode>" source="&lt;auto-generated>" name="Nutcracker" />',
+        # Embed the servo FSEQ as a pre-rendered data layer at the correct
+        # absolute channel offset. xLights merges this into the upload FSEQ
+        # alongside any lighting effects the user adds on other channels.
+        # Both the XSQ and FSEQ must be in the same xLights sequences folder.
+        f'    <DataLayer channel_offset="{dl_start_ch}" num_channels="{dl_ch_count}"'
+        f' num_frames="{num_frames}" source="{fseq_filename}" name="Servo Capture" />',
         '  </DataLayers>',
         '  <DisplayElements>',
     ]
