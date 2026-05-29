@@ -143,235 +143,101 @@ $step_time_ms = intval($cfg['step_time_ms'] ?? 50);
 .pc-tab.active { color:var(--cyan); border-bottom-color:var(--cyan); }
 .pc-tabpanel   { display:none; }
 .pc-tabpanel.active { display:block; }
+
+/* ── Live output toggle card ────────────────────────────────────────────────── */
+.live-toggle-card { display:flex; align-items:center; justify-content:space-between;
+                    gap:16px; flex-wrap:wrap; }
+.live-toggle-card .live-desc { flex:1; min-width:200px; }
+.live-toggle-card .live-desc p { color:#555; font-size:11px; line-height:1.5; margin:4px 0 0; }
+.btn-live-main { padding:12px 28px; font-size:14px; }
 </style>
 
 <div class="pc-wrap">
 
-<div class="pc-tabs">
-  <div class="pc-tab active" data-tab="capture" onclick="switchTab('capture')">Record &amp; Review</div>
-  <div class="pc-tab"        data-tab="joints"  onclick="switchTab('joints')">Map Joints</div>
-</div>
-
-<div class="pc-tabpanel active" id="tab-capture">
-
-<!-- ══ Process bar ══════════════════════════════════════════════════════════ -->
+<!-- ══ Process bar (always visible above tabs) ══════════════════════════════ -->
 <div class="pc-steps" id="pc-steps">
-  <div class="pc-step active" id="step-1"><span class="sn">1</span>Record</div>
+  <div class="pc-step active" id="step-1"><span class="sn">1</span>Map &amp; Test</div>
   <span class="sa">›</span>
-  <div class="pc-step" id="step-2"><span class="sn">2</span>Review</div>
+  <div class="pc-step" id="step-2"><span class="sn">2</span>Record</div>
   <span class="sa">›</span>
-  <div class="pc-step" id="step-3"><span class="sn">3</span>Map Joints</div>
+  <div class="pc-step" id="step-3"><span class="sn">3</span>Review</div>
   <span class="sa">›</span>
   <div class="pc-step" id="step-4"><span class="sn">4</span>Export</div>
 </div>
 
-<!-- ══ Camera unavailable ═══════════════════════════════════════════════════ -->
-<div class="pc-card" id="cam-ownership-card" style="<?= $cam_running ? 'display:none' : '' ?>">
-  <h3>Camera Unavailable</h3>
-  <p class="pc-hint" style="margin-bottom:10px;">
-    The camera is held by the Live Follow plugin.
-    Click <strong>Claim Camera</strong> to release it and start the capture feed.
-  </p>
-  <div style="display:flex; gap:8px; align-items:center; flex-wrap:wrap;">
-    <button class="pc-btn btn-play" onclick="claimCamera()">▶ Claim Camera</button>
-    <button class="pc-btn btn-ghost" onclick="restoreLiveFollow()">↩ Restore Live Follow</button>
-    <span id="cam-claim-msg" class="pc-msg" style="margin:0;"></span>
-  </div>
+<!-- ══ Tabs ══════════════════════════════════════════════════════════════════ -->
+<div class="pc-tabs">
+  <div class="pc-tab active" data-tab="map-test" onclick="switchTab('map-test')">1 · Map &amp; Test</div>
+  <div class="pc-tab"        data-tab="record"   onclick="switchTab('record')">2 · Record</div>
+  <div class="pc-tab"        data-tab="review"   onclick="switchTab('review')">3 · Review &amp; Export</div>
 </div>
 
-<!-- ══ Row 1: Camera + Right panel ══════════════════════════════════════════ -->
-<div style="display:flex; gap:14px; margin-bottom:14px; align-items:flex-start;">
+<!-- ══════════════════════════════════════════════════════════════════════════
+     TAB 1 — MAP & TEST
+     Map each joint to a servo port, enable Live Output, and confirm the
+     servos respond correctly before recording.
+     ══════════════════════════════════════════════════════════════════════ -->
+<div class="pc-tabpanel active" id="tab-map-test">
 
-  <!-- Camera -->
-  <div class="pc-card" style="flex:2; min-width:0; padding:0; overflow:hidden;">
-    <div class="cam-container">
-      <img src="/fpp-capture-api/stream" class="pc-stream"
-           onerror="this.style.display='none'" alt="">
-      <div style="position:absolute; top:10px; left:10px;">
-        <span class="pc-badge <?= $recording ? 'badge-rec' : 'badge-idle' ?>" id="badge-rec">
-          <?= $recording ? '● REC' : 'IDLE' ?>
-        </span>
-      </div>
-      <div style="position:absolute; top:10px; right:10px;">
-        <button id="btn-live" class="pc-btn btn-sm <?= ($cfg['live_output'] ?? false) ? 'btn-live-on' : 'btn-live-off' ?>"
-                onclick="toggleLive()">
-          <?= ($cfg['live_output'] ?? false) ? '⏹ Live ON' : '⏵ Live OFF' ?>
-        </button>
-      </div>
-      <div class="cam-controls">
-        <span id="rec-info" style="font-size:11px; color:#ccc; margin-right:auto; font-family:monospace;">
-          <?= $dur ?> &nbsp;·&nbsp; <?= $fc ?> frames
-        </span>
-        <button class="pc-btn btn-rec"  id="btn-rec"  onclick="recStart()" <?= $recording ? 'style="display:none"' : '' ?>>● Record</button>
-        <button class="pc-btn btn-stop" id="btn-srec" onclick="recStop()"  <?= $recording ? '' : 'style="display:none"' ?>>■ Stop</button>
-      </div>
-    </div>
-  </div>
-
-  <!-- Right panel: live values + live output only -->
-  <div class="pc-card" style="width:290px; flex-shrink:0;">
-
-    <div class="rp-section" style="padding-top:0;">
-      <div class="rp-hdr">Live Values</div>
-      <div class="tv-grid">
-        <div>
-          <div class="tv-grp" style="color:var(--cyan);">FACE</div>
-          <?php foreach (['head_yaw','head_pitch','head_roll','mouth_open',
-                          'left_eye_open','right_eye_open',
-                          'left_eyebrow_raise','right_eyebrow_raise'] as $k): ?>
-          <div class="tv-row">
-            <span class="tv-key"><?= str_replace('_',' ', ucwords($k,'_')) ?></span>
-            <span class="tv-val" id="tv-<?= $k ?>"><?= number_format($status['values'][$k] ?? 0, 2) ?></span>
-          </div>
-          <?php endforeach; ?>
-        </div>
-        <div>
-          <div class="tv-grp" style="color:var(--amber);">BODY</div>
-          <?php foreach (['torso_lean_lr','torso_lean_fb','torso_tilt',
-                          'left_arm_raise','right_arm_raise',
-                          'left_elbow_bend','right_elbow_bend',
-                          'left_wrist_raise','right_wrist_raise'] as $k): ?>
-          <div class="tv-row">
-            <span class="tv-key"><?= str_replace('_',' ', ucwords($k,'_')) ?></span>
-            <span class="tv-val body" id="tv-<?= $k ?>"><?= number_format($status['values'][$k] ?? 0, 2) ?></span>
-          </div>
-          <?php endforeach; ?>
-        </div>
-      </div>
-    </div>
-
-    <div class="rp-section">
-      <div class="rp-hdr">Session &amp; Audio</div>
-
-      <div style="margin-bottom:9px;">
-        <div style="color:var(--muted); font-size:10px; font-weight:bold; letter-spacing:1.2px; text-transform:uppercase; margin-bottom:4px;">Load Saved</div>
-        <div style="display:flex; gap:4px; align-items:center; flex-wrap:wrap;">
-          <select class="pc-select" id="sess-load-sel" style="flex:1; min-width:0; font-size:11px;">
-            <?php foreach ($sessions as $s): ?>
-              <option><?= htmlspecialchars($s) ?></option>
-            <?php endforeach; ?>
-          </select>
-          <button class="pc-btn btn-ghost btn-sm" onclick="sessLoad()">Load</button>
-          <button class="pc-btn btn-halt  btn-sm" onclick="sessDelete()">Del</button>
-          <button class="pc-btn btn-muted btn-sm" onclick="refreshSessions()" title="Refresh">↻</button>
-        </div>
-      </div>
-
-      <div style="margin-bottom:9px;">
-        <div style="color:var(--muted); font-size:10px; font-weight:bold; letter-spacing:1.2px; text-transform:uppercase; margin-bottom:4px;">Audio Track</div>
-        <div style="display:flex; gap:4px; align-items:center;">
-          <select class="pc-select" id="audio-sel" style="flex:1; min-width:0; font-size:11px;" onchange="setAudioFile(this.value)">
-            <option value="">— none —</option>
-          </select>
-          <button class="pc-btn btn-muted btn-sm" onclick="loadMediaFiles()" title="Refresh">↻</button>
-        </div>
-      </div>
-
-      <div style="margin-bottom:9px;">
-        <div style="color:var(--muted); font-size:10px; font-weight:bold; letter-spacing:1.2px; text-transform:uppercase; margin-bottom:4px;">Audio Output</div>
-        <div style="display:flex; gap:4px; align-items:center; flex-wrap:wrap;">
-          <select class="pc-select" id="audio-out-sel" style="flex:1; min-width:0; font-size:11px;" onchange="setAudioOutput(this.value)">
-            <option value="browser">Browser (your computer speakers)</option>
-          </select>
-          <button class="pc-btn btn-ghost btn-sm" onclick="testAudio()">Test</button>
-          <button class="pc-btn btn-muted btn-sm" onclick="loadAudioDevices()" title="Refresh">↻</button>
-        </div>
-        <span id="audio-msg" class="pc-msg" style="display:block; margin-top:3px;"></span>
-      </div>
-
-      <div>
-        <div style="color:var(--muted); font-size:10px; font-weight:bold; letter-spacing:1.2px; text-transform:uppercase; margin-bottom:4px;">
-          Save to File <span style="color:#444; font-size:9px; font-weight:normal; letter-spacing:0; text-transform:none;">(optional)</span>
-        </div>
-        <div style="display:flex; gap:4px; align-items:center;">
-          <input class="pc-input" id="sess-save-name" value="" placeholder="record first, then save"
-                 style="flex:1; min-width:0; font-size:11px;">
-          <button class="pc-btn btn-ghost btn-sm" onclick="sessSave()">Save</button>
-        </div>
-      </div>
-
-      <span id="status-msg" class="pc-msg" style="display:block; margin-top:8px;"></span>
-      <audio id="audio-player" preload="none" style="display:none;"></audio>
-
-    </div>
-
-  </div><!-- /right panel -->
-</div><!-- /row 1 -->
-
-<!-- ══ Session ═══════════════════════════════════════════════════════════════ -->
-<div class="pc-card" style="padding:12px 18px;">
-  <div class="rp-hdr" style="margin-bottom:6px;">Current Session</div>
-  <div id="sess-status" style="font-size:12px; font-family:monospace; color:var(--fg); line-height:1.8;">
-    <?php if ($session_name): ?>
-      <span style="color:var(--cyan);"><?= htmlspecialchars($session_name) ?></span>
-      &nbsp;·&nbsp; <span id="sess-frames" style="color:var(--muted);"><?= $fc ?> frames</span>
-      &nbsp;·&nbsp; <span id="sess-dur" style="color:var(--muted);"><?= $dur ?></span>
-    <?php else: ?>
-      <span style="color:#444;">No session — record above or load from the panel</span>
-    <?php endif; ?>
-  </div>
-</div>
-
-<!-- ══ Timeline ═══════════════════════════════════════════════════════════════ -->
+<!-- Live Output control ─────────────────────────────────────────────────── -->
 <div class="pc-card">
-  <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:10px; flex-wrap:wrap; gap:8px;">
-    <h3 style="margin:0;">Review</h3>
-    <div class="wf-filter">
-      <label><input type="radio" name="wf-filter" value="all" checked onchange="wfSetFilter('all')"> All</label>
-      <label><input type="radio" name="wf-filter" value="servo" onchange="wfSetFilter('servo')"> Servo-mapped</label>
-      <label><input type="radio" name="wf-filter" value="select" onchange="wfSetFilter('select')"> Custom</label>
+  <h3>Live Output</h3>
+  <div class="live-toggle-card">
+    <div class="live-desc">
+      <p>
+        Drives the mapped servos in real-time from the camera feed.
+        Enable here, then move in front of the camera — the joints table below
+        shows live values and the servos should follow.
+        Turn off before recording to avoid servo noise in the timeline.
+      </p>
+    </div>
+    <button id="btn-live"
+            class="pc-btn btn-live-main <?= ($cfg['live_output'] ?? false) ? 'btn-live-on' : 'btn-live-off' ?>"
+            onclick="toggleLive()">
+      <?= ($cfg['live_output'] ?? false) ? '⏹ Live ON' : '⏵ Enable Live Output' ?>
+    </button>
+  </div>
+
+  <!-- Live values visible here so user can confirm tracking while tuning -->
+  <div style="margin-top:14px; padding-top:12px; border-top:1px solid var(--div);">
+    <div class="rp-hdr" style="margin-bottom:6px;">Live Tracking Values</div>
+    <div class="tv-grid">
+      <div>
+        <div class="tv-grp" style="color:var(--cyan);">FACE</div>
+        <?php foreach (['head_yaw','head_pitch','head_roll','mouth_open',
+                        'left_eye_open','right_eye_open',
+                        'left_eyebrow_raise','right_eyebrow_raise'] as $k): ?>
+        <div class="tv-row">
+          <span class="tv-key"><?= str_replace('_',' ', ucwords($k,'_')) ?></span>
+          <span class="tv-val" id="tv-<?= $k ?>"><?= number_format($status['values'][$k] ?? 0, 2) ?></span>
+        </div>
+        <?php endforeach; ?>
+      </div>
+      <div>
+        <div class="tv-grp" style="color:var(--amber);">BODY</div>
+        <?php foreach (['torso_lean_lr','torso_lean_fb','torso_tilt',
+                        'left_arm_raise','right_arm_raise',
+                        'left_elbow_bend','right_elbow_bend',
+                        'left_wrist_raise','right_wrist_raise'] as $k): ?>
+        <div class="tv-row">
+          <span class="tv-key"><?= str_replace('_',' ', ucwords($k,'_')) ?></span>
+          <span class="tv-val body" id="tv-<?= $k ?>"><?= number_format($status['values'][$k] ?? 0, 2) ?></span>
+        </div>
+        <?php endforeach; ?>
+      </div>
     </div>
   </div>
-
-  <!-- Edit mode toggle -->
-  <div style="display:flex; gap:6px; align-items:center; flex-wrap:wrap; margin-bottom:8px;">
-    <button class="pc-btn btn-ghost btn-sm" id="btn-edit-mode" onclick="toggleEditMode()">✎ Draw</button>
-    <span id="lock-status" style="color:var(--amber); font-size:11px;"></span>
-  </div>
-
-  <!-- Scrub -->
-  <input type="range" class="pc-scrub" id="scrub-slider"
-         min="0" max="<?= max(1, $fc - 1) ?>" value="0"
-         <?= ($fc > 0) ? '' : 'disabled' ?>
-         oninput="onScrub(this.value)">
-  <div style="display:flex; justify-content:space-between; font-size:10px;
-              color:#444; margin-bottom:8px; font-family:monospace;">
-    <span id="scrub-pos">00:00.0</span>
-    <span id="scrub-dur"><?= $dur ?></span>
-  </div>
-
-  <!-- Transport -->
-  <div style="display:flex; gap:5px; align-items:center; flex-wrap:wrap; margin-bottom:10px;">
-    <button class="pc-btn btn-play  btn-sm" onclick="tlPlay()">▶ Play</button>
-    <button class="pc-btn btn-pause btn-sm" onclick="tlPause()">⏸ Pause</button>
-    <button class="pc-btn btn-halt  btn-sm" onclick="tlStop()">■ Stop</button>
-    <button class="pc-btn btn-ghost btn-sm" onclick="tlRestart()">⏮ Restart</button>
-    <button class="pc-btn btn-ghost btn-sm" id="btn-tl-half" onclick="tlToggleSpeed()">½×</button>
-    <button class="pc-btn btn-ghost btn-sm" id="btn-tl-loop" onclick="tlToggleLoop()">↻ Loop</button>
-    <span style="color:#2a2a4a; margin:0 2px;">|</span>
-    <button class="pc-btn btn-muted btn-sm" id="btn-undo" onclick="undoLastEdit()" disabled>↩ Undo</button>
-    <button class="pc-btn btn-rec   btn-sm" onclick="rerecordStart()">⏺ Re-record</button>
-    <span id="tl-status" style="color:var(--muted); font-size:11px; font-family:monospace; margin-left:4px;"></span>
-  </div>
-
-  <div id="wf-custom-checks" style="display:flex;"></div>
-  <canvas id="wf-canvas" class="no-session"></canvas>
-  <div id="wf-msg">Load or record a session to see the waveform.</div>
 </div>
 
-</div><!-- /tab-capture -->
-
-<div class="pc-tabpanel" id="tab-joints">
-
-<!-- ══ Joint Mapping ══════════════════════════════════════════════════════════ -->
+<!-- Joint Mapping ───────────────────────────────────────────────────────── -->
 <div class="pc-card">
   <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:6px;">
-    <h3 style="margin:0;">Map Joints</h3>
+    <h3 style="margin:0;">Joint → Servo Mapping</h3>
     <button class="pc-btn btn-ghost btn-sm" onclick="saveJointMap()">Save Mapping</button>
   </div>
-  <p class="pc-hint" style="margin-bottom:10px;">
-    Map each tracked joint to a servo port. Enable <strong>Live Output</strong> to drive servos in real time.
-    Min/max/center calibration is read from the Servo Calibrator plugin.
+  <p class="pc-hint">
+    Assign each tracked joint to a servo port.
+    Min / max / center calibration is read from the Servo Calibrator plugin.
   </p>
   <table class="jm-table">
     <thead>
@@ -388,14 +254,16 @@ $step_time_ms = intval($cfg['step_time_ms'] ?? 50);
     </tbody>
   </table>
   <div id="jm-msg" class="pc-msg" style="color:var(--green); margin-top:6px;"></div>
+</div>
 
-  <!-- Settings inline footer -->
-  <div style="margin-top:16px; padding-top:14px; border-top:1px solid var(--div);
-              display:grid; grid-template-columns:1fr 1fr; gap:12px 32px; max-width:600px;">
+<!-- Smoothing Settings ──────────────────────────────────────────────────── -->
+<div class="pc-card">
+  <h3>Smoothing</h3>
+  <div style="display:grid; grid-template-columns:1fr 1fr; gap:12px 32px; max-width:600px;">
     <div>
       <div style="color:var(--muted); font-size:11px; margin-bottom:4px;">
         Joint Smoothing
-        <span style="color:#444; font-size:10px; margin-left:4px;">lower = smoother/slower</span>
+        <span style="color:#444; font-size:10px; margin-left:4px;">lower = smoother / slower</span>
       </div>
       <div style="display:flex; align-items:center; gap:8px;">
         <input type="range" id="sl-smoothing" style="flex:1; accent-color:var(--cyan);"
@@ -425,7 +293,176 @@ $step_time_ms = intval($cfg['step_time_ms'] ?? 50);
   </div>
 </div>
 
-<!-- ══ Export ══════════════════════════════════════════════════════════════════ -->
+</div><!-- /tab-map-test -->
+
+
+<!-- ══════════════════════════════════════════════════════════════════════════
+     TAB 2 — RECORD
+     Pick an audio track, then hit Record while performing.
+     ══════════════════════════════════════════════════════════════════════ -->
+<div class="pc-tabpanel" id="tab-record">
+
+<!-- Camera unavailable warning ─────────────────────────────────────────── -->
+<div class="pc-card" id="cam-ownership-card" style="<?= $cam_running ? 'display:none' : '' ?>">
+  <h3>Camera Unavailable</h3>
+  <p class="pc-hint" style="margin-bottom:10px;">
+    The camera is held by the Live Follow plugin.
+    Click <strong>Claim Camera</strong> to release it and start the capture feed.
+  </p>
+  <div style="display:flex; gap:8px; align-items:center; flex-wrap:wrap;">
+    <button class="pc-btn btn-play" onclick="claimCamera()">▶ Claim Camera</button>
+    <button class="pc-btn btn-ghost" onclick="restoreLiveFollow()">↩ Restore Live Follow</button>
+    <span id="cam-claim-msg" class="pc-msg" style="margin:0;"></span>
+  </div>
+</div>
+
+<!-- Camera + Session & Audio ────────────────────────────────────────────── -->
+<div style="display:flex; gap:14px; align-items:flex-start;">
+
+  <!-- Camera feed -->
+  <div class="pc-card" style="flex:2; min-width:0; padding:0; overflow:hidden;">
+    <div class="cam-container">
+      <img src="/fpp-capture-api/stream" class="pc-stream"
+           onerror="this.style.display='none'" alt="">
+      <div style="position:absolute; top:10px; left:10px;">
+        <span class="pc-badge <?= $recording ? 'badge-rec' : 'badge-idle' ?>" id="badge-rec">
+          <?= $recording ? '● REC' : 'IDLE' ?>
+        </span>
+      </div>
+      <div class="cam-controls">
+        <span id="rec-info" style="font-size:11px; color:#ccc; margin-right:auto; font-family:monospace;">
+          <?= $dur ?> &nbsp;·&nbsp; <?= $fc ?> frames
+        </span>
+        <button class="pc-btn btn-rec"  id="btn-rec"  onclick="recStart()" <?= $recording ? 'style="display:none"' : '' ?>>● Record</button>
+        <button class="pc-btn btn-stop" id="btn-srec" onclick="recStop()"  <?= $recording ? '' : 'style="display:none"' ?>>■ Stop</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Session & Audio panel -->
+  <div class="pc-card" style="width:290px; flex-shrink:0;">
+
+    <div class="rp-section" style="padding-top:0;">
+      <div class="rp-hdr">Load Session</div>
+      <div style="display:flex; gap:4px; align-items:center; flex-wrap:wrap;">
+        <select class="pc-select" id="sess-load-sel" style="flex:1; min-width:0; font-size:11px;">
+          <?php foreach ($sessions as $s): ?>
+            <option><?= htmlspecialchars($s) ?></option>
+          <?php endforeach; ?>
+        </select>
+        <button class="pc-btn btn-ghost btn-sm" onclick="sessLoad()">Load</button>
+        <button class="pc-btn btn-halt  btn-sm" onclick="sessDelete()">Del</button>
+        <button class="pc-btn btn-muted btn-sm" onclick="refreshSessions()" title="Refresh">↻</button>
+      </div>
+    </div>
+
+    <div class="rp-section">
+      <div class="rp-hdr">Audio Track</div>
+      <div style="display:flex; gap:4px; align-items:center;">
+        <select class="pc-select" id="audio-sel" style="flex:1; min-width:0; font-size:11px;" onchange="setAudioFile(this.value)">
+          <option value="">— none —</option>
+        </select>
+        <button class="pc-btn btn-muted btn-sm" onclick="loadMediaFiles()" title="Refresh">↻</button>
+      </div>
+    </div>
+
+    <div class="rp-section">
+      <div class="rp-hdr">Audio Output</div>
+      <div style="display:flex; gap:4px; align-items:center; flex-wrap:wrap;">
+        <select class="pc-select" id="audio-out-sel" style="flex:1; min-width:0; font-size:11px;" onchange="setAudioOutput(this.value)">
+          <option value="browser">Browser (your computer speakers)</option>
+        </select>
+        <button class="pc-btn btn-ghost btn-sm" onclick="testAudio()">Test</button>
+        <button class="pc-btn btn-muted btn-sm" onclick="loadAudioDevices()" title="Refresh">↻</button>
+      </div>
+      <span id="audio-msg" class="pc-msg" style="display:block; margin-top:3px;"></span>
+    </div>
+
+    <div class="rp-section">
+      <div class="rp-hdr">
+        Save Recording
+        <span style="color:#444; font-size:9px; font-weight:normal; letter-spacing:0; text-transform:none; margin-left:4px;">(optional)</span>
+      </div>
+      <div style="display:flex; gap:4px; align-items:center;">
+        <input class="pc-input" id="sess-save-name" value="" placeholder="record first, then name it"
+               style="flex:1; min-width:0; font-size:11px;">
+        <button class="pc-btn btn-ghost btn-sm" onclick="sessSave()">Save</button>
+      </div>
+    </div>
+
+    <span id="status-msg" class="pc-msg" style="display:block; margin-top:8px; padding-top:4px;"></span>
+    <audio id="audio-player" preload="none" style="display:none;"></audio>
+
+  </div><!-- /session & audio panel -->
+</div><!-- /camera row -->
+
+</div><!-- /tab-record -->
+
+
+<!-- ══════════════════════════════════════════════════════════════════════════
+     TAB 3 — REVIEW & EXPORT
+     Scrub through the recording, edit curves, then export for xLights.
+     ══════════════════════════════════════════════════════════════════════ -->
+<div class="pc-tabpanel" id="tab-review">
+
+<!-- Current session info ────────────────────────────────────────────────── -->
+<div class="pc-card" style="padding:12px 18px; margin-bottom:14px;">
+  <div id="sess-status" style="font-size:12px; font-family:monospace; color:var(--fg); line-height:1.8;">
+    <?php if ($session_name): ?>
+      <span style="color:var(--cyan);"><?= htmlspecialchars($session_name) ?></span>
+      &nbsp;·&nbsp; <span id="sess-frames" style="color:var(--muted);"><?= $fc ?> frames</span>
+      &nbsp;·&nbsp; <span id="sess-dur" style="color:var(--muted);"><?= $dur ?></span>
+    <?php else: ?>
+      <span style="color:#444;">No session loaded — record in the Record tab or load a saved session.</span>
+    <?php endif; ?>
+  </div>
+</div>
+
+<!-- Timeline / Waveform editor ──────────────────────────────────────────── -->
+<div class="pc-card">
+  <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:10px; flex-wrap:wrap; gap:8px;">
+    <h3 style="margin:0;">Review</h3>
+    <div class="wf-filter">
+      <label><input type="radio" name="wf-filter" value="all" checked onchange="wfSetFilter('all')"> All</label>
+      <label><input type="radio" name="wf-filter" value="servo" onchange="wfSetFilter('servo')"> Servo-mapped</label>
+      <label><input type="radio" name="wf-filter" value="select" onchange="wfSetFilter('select')"> Custom</label>
+    </div>
+  </div>
+
+  <div style="display:flex; gap:6px; align-items:center; flex-wrap:wrap; margin-bottom:8px;">
+    <button class="pc-btn btn-ghost btn-sm" id="btn-edit-mode" onclick="toggleEditMode()">✎ Draw</button>
+    <span id="lock-status" style="color:var(--amber); font-size:11px;"></span>
+  </div>
+
+  <input type="range" class="pc-scrub" id="scrub-slider"
+         min="0" max="<?= max(1, $fc - 1) ?>" value="0"
+         <?= ($fc > 0) ? '' : 'disabled' ?>
+         oninput="onScrub(this.value)">
+  <div style="display:flex; justify-content:space-between; font-size:10px;
+              color:#444; margin-bottom:8px; font-family:monospace;">
+    <span id="scrub-pos">00:00.0</span>
+    <span id="scrub-dur"><?= $dur ?></span>
+  </div>
+
+  <div style="display:flex; gap:5px; align-items:center; flex-wrap:wrap; margin-bottom:10px;">
+    <button class="pc-btn btn-play  btn-sm" onclick="tlPlay()">▶ Play</button>
+    <button class="pc-btn btn-pause btn-sm" onclick="tlPause()">⏸ Pause</button>
+    <button class="pc-btn btn-halt  btn-sm" onclick="tlStop()">■ Stop</button>
+    <button class="pc-btn btn-ghost btn-sm" onclick="tlRestart()">⏮ Restart</button>
+    <button class="pc-btn btn-ghost btn-sm" id="btn-tl-half" onclick="tlToggleSpeed()">½×</button>
+    <button class="pc-btn btn-ghost btn-sm" id="btn-tl-loop" onclick="tlToggleLoop()">↻ Loop</button>
+    <span style="color:#2a2a4a; margin:0 2px;">|</span>
+    <button class="pc-btn btn-muted btn-sm" id="btn-undo" onclick="undoLastEdit()" disabled>↩ Undo</button>
+    <button class="pc-btn btn-rec   btn-sm" onclick="rerecordStart()">⏺ Re-record</button>
+    <span id="tl-status" style="color:var(--muted); font-size:11px; font-family:monospace; margin-left:4px;"></span>
+  </div>
+
+  <div id="wf-custom-checks" style="display:flex;"></div>
+  <canvas id="wf-canvas" class="no-session"></canvas>
+  <div id="wf-msg">Load or record a session to see the waveform.</div>
+</div>
+
+<!-- Export ──────────────────────────────────────────────────────────────── -->
 <div class="pc-card">
   <h3>Export for xLights</h3>
   <p class="pc-hint">
@@ -470,7 +507,7 @@ $step_time_ms = intval($cfg['step_time_ms'] ?? 50);
   </div>
 </div>
 
-</div><!-- /tab-joints -->
+</div><!-- /tab-review -->
 
 </div><!-- .pc-wrap -->
 
@@ -517,7 +554,7 @@ function setStep(n) {
     if (!el) return;
     el.className = 'pc-step' + (i === n ? ' active' : i < n ? ' done' : '');
   });
-  if (n === 3) switchTab('joints');
+  if (n === 3 || n === 4) switchTab('review');
 }
 
 // ── Waveform ──────────────────────────────────────────────────────────────────
@@ -595,7 +632,6 @@ const WF = {
     ctx.fillStyle = '#080816'; ctx.fillRect(0, 0, cssW, this.RULER_H);
     ctx.strokeStyle = '#333'; ctx.lineWidth = 1;
     ctx.beginPath(); ctx.moveTo(waveX, 0); ctx.lineTo(waveX, this.RULER_H); ctx.stroke();
-    // Lock column header
     const hx = this.LOCK_W / 2, hy = this.RULER_H / 2 + 1;
     ctx.strokeStyle = '#3a3a5a'; ctx.lineWidth = 1.2;
     ctx.strokeRect(hx - 4, hy - 2, 8, 6);
@@ -622,7 +658,6 @@ const WF = {
       if (mapped) { ctx.fillStyle = color; ctx.fillRect(0, ry, 3, this.ROW_H); }
       if (WF.editMode && !_locked[j.key]) { ctx.fillStyle = 'rgba(76,201,240,0.04)'; ctx.fillRect(waveX, ry, waveW, this.ROW_H); }
       if (WF._drawChannel === j.key) { ctx.fillStyle = 'rgba(76,201,240,0.10)'; ctx.fillRect(waveX, ry, waveW, this.ROW_H); }
-      // Lock icon
       const lx = 4, lcy = ry + this.ROW_H / 2 - 1;
       ctx.lineWidth = 1.5; ctx.strokeStyle = _locked[j.key] ? '#fb8500' : '#2a2a3a';
       ctx.strokeRect(lx, lcy, 10, 7);
@@ -718,7 +753,6 @@ const WF = {
     if (_locked[j.key]) return;
     if (this._drawChannel && this._drawChannel !== j.key) return;
     this._drawChannel = j.key;
-    // Capture pre-draw snapshot once so we can build the undo entry later
     if (!this._drawSnapshot) {
       const v0 = this.data.data[j.key];
       if (v0) this._drawSnapshot = {key: j.key, vals: [...v0]};
@@ -733,7 +767,6 @@ const WF = {
     const last = this._drawEdits[this._drawEdits.length - 1];
     if (last && last.frame === frameIdx) { last.value = value; }
     else { this._drawEdits.push({frame: frameIdx, value}); }
-    // Live preview: interpolate between last two points into display data
     const vals = this.data.data[j.key];
     if (vals) {
       const n    = this.data.timestamps.length;
@@ -826,20 +859,15 @@ function toggleChannelLock(key) {
   const canvas = document.getElementById('wf-canvas');
   canvas.addEventListener('mousedown', e => {
     const x = e.offsetX, y = e.offsetY;
-    // Lock zone: click toggles lock for the row under cursor
     if (x < WF.LOCK_W) {
       const rowIdx = Math.floor((y - WF.RULER_H) / WF.ROW_H);
       const vis = WF.visible();
-      if (rowIdx >= 0 && rowIdx < vis.length) {
-        toggleChannelLock(vis[rowIdx].key);
-      }
+      if (rowIdx >= 0 && rowIdx < vis.length) toggleChannelLock(vis[rowIdx].key);
       return;
     }
-    // Edit/draw mode: drag to draw new values on a channel
     if (WF.editMode && x >= WF.LOCK_W + WF.LABEL_W) {
       WF._drawing = true; WF._drawEdits = []; WF._drawAtPoint(x, y); return;
     }
-    // Seek mode
     if (x < WF.LOCK_W + WF.LABEL_W) return;
     WF.dragging = true; WF.seek(x);
   });
@@ -851,7 +879,6 @@ function toggleChannelLock(key) {
     if (WF._drawing && WF._drawEdits.length > 0 && WF._drawChannel) {
       const ch   = WF._drawChannel;
       const snap = WF._drawSnapshot;
-      // Build undo entry: original values over the drawn frame range
       if (snap && snap.key === ch && WF.data) {
         const n    = snap.vals.length;
         const step = Math.max(1, WF.data.total_frames / n);
@@ -1008,8 +1035,8 @@ function toggleLive() {
 function setLiveBtn(on) {
   const btn = document.getElementById('btn-live');
   if (!btn) return;
-  btn.textContent = on ? '⏹ Live ON' : '⏵ Live OFF';
-  btn.className   = 'pc-btn btn-sm ' + (on ? 'btn-live-on' : 'btn-live-off');
+  btn.textContent = on ? '⏹ Live ON' : '⏵ Enable Live Output';
+  btn.className   = 'pc-btn btn-live-main ' + (on ? 'btn-live-on' : 'btn-live-off');
 }
 
 // ── Smoothing ─────────────────────────────────────────────────────────────────
@@ -1075,16 +1102,16 @@ function recStart() {
   fetch(API+'/api/record/start', {method:'POST'}).then(pollStatus);
   _syncAudio('play', 0);
 }
-function recStop()  {
+function recStop() {
   _syncAudio('stop');
   fetch(API+'/api/record/stop', {method:'POST'}).then(() => {
     pollStatus();
     WF.load();
-    setStep(2);
+    setStep(3);
     const d = new Date(), pad = n => String(n).padStart(2,'0');
     const name = `capture-${d.getFullYear()}${pad(d.getMonth()+1)}${pad(d.getDate())}-${pad(d.getHours())}${pad(d.getMinutes())}.json`;
     const el = document.getElementById('sess-save-name');
-    if (!el.value.trim()) el.value = name;
+    if (el && !el.value.trim()) el.value = name;
   });
 }
 
@@ -1112,7 +1139,7 @@ function sessLoad() {
       showMsg(`✓ Loaded ${d.frames} frames (${d.duration}s)`, true);
       updateSessionInfo(sel.value, d.frames, d.duration);
       WF.load();
-      setStep(2);
+      setStep(3);
     } else {
       showMsg('✗ '+d.error, false);
     }
@@ -1183,7 +1210,6 @@ function testAudio() {
   const el = document.getElementById('audio-msg');
   el.style.color = '#888'; el.textContent = 'Testing…';
   if (_audioOutput === 'browser') {
-    // Test by trying to play via _syncAudio
     const file = (document.getElementById('audio-sel') || {}).value || '';
     if (!file) {
       el.style.color='#fb8500'; el.textContent='⚠ No audio file selected';
@@ -1311,7 +1337,6 @@ function showXLightsMap(d) {
 // ── Status poll ───────────────────────────────────────────────────────────────
 function pollStatus() {
   return fetch(API+'/api/status').then(r=>r.json()).then(s => {
-    // Recording badge
     const recBadge = document.getElementById('badge-rec');
     recBadge.textContent = s.recording ? '● REC' : 'IDLE';
     recBadge.className   = 'pc-badge '+(s.recording ? 'badge-rec' : 'badge-idle');
@@ -1319,16 +1344,14 @@ function pollStatus() {
     document.getElementById('btn-srec').style.display = s.recording ? '':'none';
     document.getElementById('rec-info').innerHTML = s.duration_str+' &nbsp;·&nbsp; '+s.frame_count+' frames';
 
-    if (s.recording) setStep(1);
+    if (s.recording) setStep(2);
 
-    // Scrub + waveform cursor
     if (s.playing || s.paused) {
       updateScrubSlider(s.pb_pos);
       WF.cursor = s.pb_pos;
       WF.draw();
     }
 
-    // Timeline buttons
     if (s.pb_speed !== undefined) {
       TL.speed = s.pb_speed;
       TL.loop  = !!s.pb_loop;
@@ -1338,7 +1361,6 @@ function pollStatus() {
         ? (TL.speed !== 1.0 ? `${TL.speed}×` : '') + (TL.loop ? '  ↻' : '') : '';
     }
 
-    // Session info
     if (s.session_name) {
       const frEl  = document.getElementById('sess-frames');
       const durEl = document.getElementById('sess-dur');
@@ -1350,15 +1372,12 @@ function pollStatus() {
       if (scrubDur) scrubDur.textContent = s.duration_str;
     }
 
-    // Tracked values + joint bars
     updateJointBars(s.values || {});
 
-    // Build joint table once
     if (!JM_built && s.ports && s.ports.length > 0) {
       buildJointTable(s.ports, s.joint_map || {});
     }
 
-    // Sync audio dropdowns to config (first poll only — user changes handled by onchange)
     if (!pollStatus._audioSynced && s.audio_file !== undefined) {
       const asel = document.getElementById('audio-sel');
       if (asel && [...asel.options].some(o => o.value === s.audio_file)) asel.value = s.audio_file;
