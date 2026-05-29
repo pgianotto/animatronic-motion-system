@@ -1139,7 +1139,9 @@ function sessLoad() {
       showMsg(`✓ Loaded ${d.frames} frames (${d.duration}s)`, true);
       updateSessionInfo(sel.value, d.frames, d.duration);
       WF.load();
-      setStep(3);
+      // Re-sync audio dropdown to whatever the loaded session stored
+      pollStatus._audioSynced = false;
+      // Don't auto-switch tab — user may still need to set audio before reviewing
     } else {
       showMsg('✗ '+d.error, false);
     }
