@@ -115,4 +115,6 @@ EOF
     sudo systemctl reload apache2 2>/dev/null || true
 fi
 
+chmod +x "$PLUGIN_DIR/scripts/preStart.sh"
+
 echo "Done. Access via FPP menu: Plugins > Animatronic Capture"
