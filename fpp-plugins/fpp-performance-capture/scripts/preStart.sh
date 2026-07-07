@@ -4,6 +4,6 @@
 PLUGIN_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 if ! systemctl is-enabled fpp-performance-capture.service &>/dev/null 2>&1; then
     echo "[fpp-performance-capture] Service missing — reinstalling after OS upgrade..."
-    git -C "$PLUGIN_DIR" pull --quiet 2>/dev/null || true
+    sudo -u fpp git -C "$PLUGIN_DIR" pull --quiet 2>/dev/null || true
     bash "$PLUGIN_DIR/fpp_install.sh"
 fi
