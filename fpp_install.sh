@@ -8,4 +8,6 @@ SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 # Without this, git 2.35+ rejects pull/fetch from root in fpp-owned dirs.
 sudo git config --global --add safe.directory "$SCRIPT_DIR" 2>/dev/null || true
 
+chmod +x "$SCRIPT_DIR/scripts/preStart.sh" 2>/dev/null || true
+
 exec "$SCRIPT_DIR/fpp-plugins/fpp-performance-capture/fpp_install.sh"

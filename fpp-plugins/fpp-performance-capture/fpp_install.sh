@@ -1,7 +1,5 @@
 #!/bin/bash
 # FPP Performance Capture plugin installer/updater
-set -e
-
 PLUGIN_DIR="$(cd "$(dirname "$0")" && pwd)"
 LIB_DIR="$PLUGIN_DIR/lib"
 
@@ -116,5 +114,9 @@ EOF
 fi
 
 chmod +x "$PLUGIN_DIR/scripts/preStart.sh"
+
+# Allow root (used by FPP's plugin manager) to run git in this directory.
+# Without this, git 2.35+ rejects pull/fetch from root in fpp-owned dirs.
+sudo git config --global --add safe.directory "$(cd "$PLUGIN_DIR/../.." && pwd)" 2>/dev/null || true
 
 echo "Done. Access via FPP menu: Plugins > Animatronic Capture"
