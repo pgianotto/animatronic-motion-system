@@ -150,6 +150,15 @@ $step_time_ms = intval($cfg['step_time_ms'] ?? 50);
 .live-toggle-card .live-desc { flex:1; min-width:200px; }
 .live-toggle-card .live-desc p { color:#555; font-size:11px; line-height:1.5; margin:4px 0 0; }
 .btn-live-main { padding:12px 28px; font-size:14px; }
+
+.exp-tabs { display:flex; gap:0; margin-bottom:16px; border-bottom:2px solid var(--div); }
+.exp-tab  { padding:8px 20px; cursor:pointer; font-size:12px; font-weight:bold;
+            letter-spacing:0.8px; text-transform:uppercase; color:var(--muted);
+            border-bottom:2px solid transparent; margin-bottom:-2px; }
+.exp-tab:hover  { color:var(--fg); }
+.exp-tab.active { color:var(--cyan); border-bottom-color:var(--cyan); }
+.exp-panel      { display:none; }
+.exp-panel.active { display:block; }
 </style>
 
 <div class="pc-wrap">
@@ -512,13 +521,16 @@ $step_time_ms = intval($cfg['step_time_ms'] ?? 50);
     <span id="fps-label" style="color:#555; font-size:11px;"></span>
   </div>
 
-  <!-- FPP Direct Export (primary) -->
-  <div style="margin-bottom:20px;">
-    <div style="font-weight:bold; color:var(--cyan); font-size:12px; margin-bottom:6px;">
-      EXPORT FOR FPP (RECOMMENDED)
-    </div>
-    <p class="pc-hint" style="margin-bottom:10px;">
-      Saves an FSEQ directly to FPP's sequences folder. No xLights needed —
+  <!-- Export type tabs -->
+  <div class="exp-tabs">
+    <div class="exp-tab active" data-exp="fpp"     onclick="switchExportTab('fpp')">FPP Direct</div>
+    <div class="exp-tab"        data-exp="xlights" onclick="switchExportTab('xlights')">xLights</div>
+  </div>
+
+  <!-- FPP Direct panel -->
+  <div class="exp-panel active" id="exp-fpp">
+    <p class="pc-hint" style="margin-bottom:12px;">
+      Saves an FSEQ directly to FPP&rsquo;s sequences folder. No xLights needed —
       go to FPP&rsquo;s scheduler and add the file to play it.
     </p>
     <div class="pc-field">
@@ -534,21 +546,18 @@ $step_time_ms = intval($cfg['step_time_ms'] ?? 50);
     </div>
   </div>
 
-  <div style="border-top:1px solid #1a2a4a; padding-top:16px;">
-    <div style="font-weight:bold; color:#555; font-size:12px; margin-bottom:6px;">
-      EXPORT FOR XLIGHTS (ADVANCED)
-    </div>
-    <p class="pc-hint" style="margin-bottom:10px;">
-      Exports a paired <code>.xsq</code> + <code>.fseq</code> bundle.
-      Download <strong>both files</strong> to the same xLights sequences folder,
-      open the <code>.xsq</code>, add your lighting effects on other channels,
-      then upload to FPP. The servo channels are embedded as a data layer — no
-      model or controller setup needed in xLights.
+  <!-- xLights panel -->
+  <div class="exp-panel" id="exp-xlights">
+    <p class="pc-hint" style="margin-bottom:12px;">
+      Exports an <code>.xsq</code> file for xLights. Open it in xLights,
+      add your lighting effects on other channels, then upload to FPP.
+      The servo channels are embedded as a data layer — no model or controller
+      setup needed in xLights.
     </p>
     <div class="pc-field">
-      <span class="pc-label">Base name</span>
+      <span class="pc-label">Filename</span>
       <input class="pc-input" id="xsq-name" value="capture" style="width:180px;" placeholder="no extension">
-      <button class="pc-btn btn-ghost" onclick="exportXlights()">Export for xLights</button>
+      <button class="pc-btn btn-ghost" onclick="exportXlights()">Export XSQ for xLights</button>
     </div>
     <div id="xsq-msg" class="pc-msg"></div>
     <div id="xsq-downloads" style="display:none; gap:8px; flex-wrap:wrap; margin-top:8px;"></div>
@@ -1409,6 +1418,13 @@ function exportFseq() {
     });
 }
 
+function switchExportTab(name) {
+  document.querySelectorAll('.exp-tab').forEach(t =>
+    t.classList.toggle('active', t.dataset.exp === name));
+  document.querySelectorAll('.exp-panel').forEach(p =>
+    p.classList.toggle('active', p.id === 'exp-' + name));
+}
+
 function exportXlights() {
   const name    = document.getElementById('xsq-name').value.trim() || 'capture';
   const step_ms = getStepTimeMs();
@@ -1422,12 +1438,12 @@ function exportXlights() {
         msg.style.color='#06d6a0';
         msg.textContent=`✓ ${d.frames} frames · ${d.duration}s · ${d.channels} ch`;
         dl.innerHTML='';
-        [d.xsq_filename, d.fseq_filename].filter(Boolean).forEach(fn => {
+        if (d.xsq_filename) {
           const a = document.createElement('a');
-          a.href=API+'/api/sequence/download/'+encodeURIComponent(fn);
-          a.className='pc-btn btn-ghost'; a.textContent='↓ '+fn; a.download=fn;
+          a.href=API+'/api/sequence/download/'+encodeURIComponent(d.xsq_filename);
+          a.className='pc-btn btn-ghost'; a.textContent='↓ '+d.xsq_filename; a.download=d.xsq_filename;
           dl.appendChild(a);
-        });
+        }
         dl.style.display='flex';
         setStep(4);
         if (d.xsq_error) { msg.textContent+='  (XSQ: '+d.xsq_error+')'; msg.style.color='#fb8500'; }
