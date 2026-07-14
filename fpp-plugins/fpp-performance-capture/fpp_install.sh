@@ -57,8 +57,8 @@ fi
 CORE_DIR="/home/fpp/media/animatronic"
 if [ -d "$CORE_DIR/.git" ]; then
     echo "Updating shared core library..."
-    sudo chown -R fpp:fpp "$CORE_DIR/.git" 2>/dev/null || true
-    git -C "$CORE_DIR" pull --quiet 2>/dev/null || echo "  WARNING: git pull failed — using existing core"
+    sudo chown -R fpp:fpp "$CORE_DIR" 2>/dev/null || true
+    sudo -u fpp git -C "$CORE_DIR" pull --quiet 2>/dev/null || echo "  WARNING: git pull failed — using existing core"
 else
     echo "Cloning shared core library..."
     git clone --quiet https://github.com/pgianotto/animatronic-motion-system.git "$CORE_DIR" || \
