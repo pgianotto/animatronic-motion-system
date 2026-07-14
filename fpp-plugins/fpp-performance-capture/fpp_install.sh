@@ -13,13 +13,20 @@ if ! dpkg -s python3-opencv &>/dev/null 2>&1; then
 fi
 
 # ── uv (fast Python installer) — install to /usr/local/bin so all users see it ─
-export PATH="/usr/local/bin:$HOME/.local/bin:$PATH"
+export PATH="/usr/local/bin:$HOME/.local/bin:/root/.local/bin:$PATH"
 if ! command -v uv &>/dev/null; then
+    echo "Installing uv..."
     curl -LsSf https://astral.sh/uv/install.sh | sh
-    if [ -f "$HOME/.local/bin/uv" ]; then
-        sudo mv "$HOME/.local/bin/uv" /usr/local/bin/uv 2>/dev/null || true
-    fi
+    # astral installer drops uv in the invoking user's .local/bin — move to system path
+    for candidate in "$HOME/.local/bin/uv" /root/.local/bin/uv /home/fpp/.local/bin/uv; do
+        if [ -f "$candidate" ]; then
+            sudo cp "$candidate" /usr/local/bin/uv && break
+        fi
+    done
     export PATH="/usr/local/bin:$PATH"
+fi
+if ! command -v uv &>/dev/null; then
+    echo "WARNING: uv install failed — will attempt fallback with system pip"
 fi
 
 # ── Python 3.11 venv — create as fpp so Python downloads land in /home/fpp ───
