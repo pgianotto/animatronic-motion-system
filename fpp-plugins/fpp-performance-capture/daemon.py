@@ -137,12 +137,14 @@ class JointMapper:
     """Maps tracked joint values → servo µs using co-other.json calibration."""
 
     def __init__(self, joint_map: dict, out_idx: int):
-        self._map = joint_map    # {joint_key: {port, invert, scale}}
-        self._out = _load_co_other(out_idx)
+        self._map     = joint_map    # {joint_key: {port, invert, scale}}
+        self._out_idx = out_idx
+        self._out     = _load_co_other(out_idx)
 
     def reload(self, joint_map: dict, out_idx: int):
-        self._map = joint_map
-        self._out = _load_co_other(out_idx)
+        self._map     = joint_map
+        self._out_idx = out_idx
+        self._out     = _load_co_other(out_idx)
 
     def compute(self, values: dict) -> list:
         """Return list of (port_idx, us) for all mapped joints."""
@@ -173,12 +175,19 @@ class JointMapper:
         return result
 
     def port_info(self) -> list:
-        if not self._out:
+        # Re-read co-other.json fresh rather than using the cached self._out:
+        # other tools (e.g. fpp-servo-calibrator) can rename/recalibrate ports
+        # at any time, and the mapping page polls this via /api/status, so it
+        # should always reflect what's currently on disk. self._out itself
+        # stays cached for compute()'s hot path and is only refreshed via
+        # reload() (joint-map save) or lazy playback-start init.
+        out = _load_co_other(self._out_idx)
+        if not out:
             return []
-        start_ch = int(self._out.get('startChannel', 1))
+        start_ch = int(out.get('startChannel', 1))
         result = []
         fpp_ch = start_ch
-        for i, p in enumerate(self._out.get('ports', [])):
+        for i, p in enumerate(out.get('ports', [])):
             size = 2 if p.get('dataType', 0) == 2 else 1
             result.append({
                 'port': i,
@@ -786,7 +795,9 @@ class CaptureDaemon:
                 fseq_filename=fseq_filename,
                 frames=self._capture.get_frames(),
                 joint_map=self.cfg.get('joint_map', {}),
-                co_other_out=self._mapper._out,
+                # Fresh read so exported model names reflect the current
+                # co-other.json, not whatever was cached at daemon startup.
+                co_other_out=_load_co_other(self._mapper._out_idx),
                 step_time_ms=step_ms,
                 output_path=str(xsq_path),
             )
