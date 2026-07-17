@@ -224,11 +224,12 @@ async function scCmd(payload) {
 
 async function scSendCh(port, us) {
     us = Math.max(0, Math.min(4000, Math.round(us)));
-    if (SC.item.source === 'pwm') {
-        scPwmTestStart(SC.out.ports[port]._rawIdx, us, true);
-    } else {
-        await scCmd({ action: 'set', port, us });
-    }
+    // Native PWM capes: fppd's Output-Specific test only supports snapping a
+    // port to its scaled min or max (see PCA9685Output::OverlayTestData —
+    // the arbitrary value is parsed but never used), so there is no
+    // continuous live position to send here. Use the Test Min/Max buttons.
+    if (SC.item.source === 'pwm') return;
+    await scCmd({ action: 'set', port, us });
 }
 
 async function scSendAll(channels) {
@@ -338,13 +339,13 @@ function zbIntToStr(i) { return ZB_INT_TO_STR[i] ?? 'Hold'; }
 function zbStrToInt(s) { return ZB_STR_TO_INT.hasOwnProperty(s) ? ZB_STR_TO_INT[s] : 0; }
 
 /* ── Native PWM cape live test (FPP "Test Start"/"Test Stop" command) ─────
- * fppd drives cape PWM hardware directly; there is no I2C bus for us to open,
- * so live preview must go through FPP's own output-specific test command
- * (the same one co-pwm.php uses for its range-limit preview slider). That
- * command only supports manipulating ONE port per call — confirmed from
- * co-pwm.php's client-side use; the exact fppd-side interpretation of
- * `isMin` is not visible from here, so this is inferred from the existing
- * front-end and should be confirmed against real hardware. */
+ * fppd drives cape PWM hardware directly; there is no I2C bus for us to open.
+ * Confirmed against src/channeloutput/PCA9685.cpp (OverlayTestData): the
+ * Output-Specific/"PCA9685 PWM" test command only supports snapping ONE port
+ * to its scaled min (1) or max (255/65535) — manipulation.value is parsed
+ * but never used, so there is no arbitrary live position, only a boundary
+ * test. That branch only runs for outputs with no "deviceID" in their
+ * config, i.e. exactly the native-cape (co-pwm) case. */
 function scPwmBuildConfig(manipulation) {
     const o = SC.item.ref;
     const cfg = {
@@ -376,13 +377,18 @@ async function scPwmCommand(command, args) {
     }
 }
 
-function scPwmTestStart(rawPortIdx, value, isMin) {
-    const cfg = scPwmBuildConfig({ port: rawPortIdx, value: Math.round(value), isMin: !!isMin });
+function scPwmTestStart(rawPortIdx, isMin) {
+    const cfg = scPwmBuildConfig({ port: rawPortIdx, value: 0, isMin: !!isMin });
     scPwmCommand('Test Start', ['2000', 'Output Specific', 'PCA9685 PWM', '1', JSON.stringify(cfg)]);
 }
 
 function scPwmTestStop() {
     scPwmCommand('Test Stop', []);
+}
+
+async function scPwmTestBoundary(px, isMin) {
+    if (!SC.on) { scShowErr('Enable Test first'); return; }
+    scPwmTestStart(SC.out.ports[px]._rawIdx, isMin);
 }
 
 async function scSave() {
@@ -505,11 +511,11 @@ function scRender(idx) {
         SC.solo[x] = false;
         SC.flip[x] = false;
         const zb = Number.isInteger(p.zeroBehavior) ? p.zeroBehavior : 0;
-        cont.appendChild(scStrip(x, ch, min, max, ctr, p.description ?? '', zb, absMin, absMax, unit));
+        cont.appendChild(scStrip(x, ch, min, max, ctr, p.description ?? '', zb, absMin, absMax, unit, SC.item.source === 'pwm'));
     });
 }
 
-function scStrip(px, ch, min, max, ctr, desc, zeroBehavior, absMin, absMax, unit) {
+function scStrip(px, ch, min, max, ctr, desc, zeroBehavior, absMin, absMax, unit, isPwm) {
     const d = document.createElement('div');
     d.className    = 'sc-strip';
     d.id           = `scs${px}`;
@@ -561,6 +567,12 @@ function scStrip(px, ch, min, max, ctr, desc, zeroBehavior, absMin, absMax, unit
         <button class="sc-cap-btn sc-cap-ctr" title="Set Center to current fader position">Ctr</button>
         <button class="sc-cap-btn sc-cap-max" title="Set Max to current fader position">Max</button>
       </div>
+      ${isPwm ? `
+      <div class="sc-capture-wrap">
+        <span class="sc-cap-lbl">Test→</span>
+        <button class="sc-cap-btn sc-pwm-min" title="Command this port to its configured Min (fppd boundary test — Enable Test first)">Min</button>
+        <button class="sc-cap-btn sc-pwm-max" title="Command this port to its configured Max (fppd boundary test — Enable Test first)">Max</button>
+      </div>` : ''}
       <div class="sc-zb-wrap">
         <span class="sc-zb-lbl">Zero</span>
         <select class="sc-zbsel" title="Behavior when test mode is disabled">
@@ -591,6 +603,12 @@ function scStrip(px, ch, min, max, ctr, desc, zeroBehavior, absMin, absMax, unit
     const nmx  = d.querySelector('.sc-nmx');
     const nmn  = d.querySelector('.sc-nmn');
     const nctr = d.querySelector('.sc-ncenter');
+
+    if (isPwm) {
+        fdr.title = 'Native PWM cape: fppd only supports Min/Max boundary tests, not live positioning — use the Test buttons below';
+        d.querySelector('.sc-pwm-min')?.addEventListener('click', () => scPwmTestBoundary(px, true));
+        d.querySelector('.sc-pwm-max')?.addEventListener('click', () => scPwmTestBoundary(px, false));
+    }
 
     // ── Fader (test only, does not mark dirty)
     fdr.addEventListener('input', () => {
