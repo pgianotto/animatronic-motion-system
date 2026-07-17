@@ -224,19 +224,25 @@ async function scCmd(payload) {
 
 async function scSendCh(port, us) {
     us = Math.max(0, Math.min(4000, Math.round(us)));
-    // Native PWM capes: fppd's Output-Specific test only supports snapping a
-    // port to its scaled min or max (see PCA9685Output::OverlayTestData —
-    // the arbitrary value is parsed but never used), so there is no
-    // continuous live position to send here. Use the Test Min/Max buttons.
-    if (SC.item.source === 'pwm') return;
+    if (SC.item.source === 'pwm') {
+        const p = SC.out.ports[port];
+        // Non-Scaled ports have no continuous live position — use the
+        // Test Min/Max buttons (fppd's Output-Specific test) instead.
+        if (p.scaled) scOverlaySetPort(p, scPwmEncode(us, p.min, p.center, p.max, p.is16bit));
+        return;
+    }
     await scCmd({ action: 'set', port, us });
 }
 
 async function scSendAll(channels) {
-    // Native PWM capes can only manipulate one port per command; Ramp Test
-    // (the only caller that sends multiple channels at once) is disabled
-    // for that source, so this path is co-other only.
-    if (!channels.length || SC.item.source !== 'other') return;
+    if (!channels.length) return;
+    if (SC.item.source === 'pwm') {
+        channels.forEach(({ port, us }) => {
+            const p = SC.out.ports[port];
+            if (p.scaled) scOverlaySetPort(p, scPwmEncode(us, p.min, p.center, p.max, p.is16bit));
+        });
+        return;
+    }
     try {
         const r = await fetch('/fpp-servo-calibrator-api/', {
             method:  'POST',
@@ -251,9 +257,13 @@ async function scSendAll(channels) {
 }
 
 async function scStop() {
+    // Called by "Center All": force every port to its configured center.
     if (!SC.out) return;
     if (SC.item.source === 'pwm') {
-        scPwmTestStop();
+        SC.out.ports.forEach(p => {
+            if (p.scaled) scOverlaySetPort(p, scPwmEncode(p.center, p.min, p.center, p.max, p.is16bit));
+        });
+        scPwmTestStop(); // defensive: stop any lingering Min/Max snap test too
     } else {
         await scCmd({ action: 'stop' });
     }
@@ -391,6 +401,66 @@ async function scPwmTestBoundary(px, isMin) {
     scPwmTestStart(SC.out.ports[px]._rawIdx, isMin);
 }
 
+/* ── Native PWM cape live positioning (FPP channel overlay API) ───────────
+ * Apache proxies /api/overlays/* to fppd's local API (etc/apache2.site:
+ * "RewriteRule ^overlays/(.*)$ http://localhost:32322/overlays/$1 [P]"),
+ * so a same-origin PUT here writes directly into fppd's live channel data
+ * buffer — the same mechanism fpp-live-follow already uses in production
+ * for pan/tilt. Any output driver (including a native PWM cape) decodes
+ * that channel data continuously, so this gives true live positioning,
+ * unlike the Test Start/Stop command's min/max-only snap.
+ *
+ * The encode math below is the exact inverse of the "Scaled" decode in
+ * src/channeloutput/PCA9685.cpp (PCA9685Output::SetValue): a channel value
+ * of 0 is reserved there to mean "no override, use configured zero
+ * behavior" — so encoded values are always clamped to >= 1. */
+function scPwmEncode(us, min, center, max, is16bit) {
+    const half = is16bit ? 32768 : 128;
+    if (us === center) return half; // exact center decodes back to `center`
+    let val;
+    if (us <= center) {
+        const belowDenom = is16bit ? 32767 : 128; // asymmetric in the 16-bit case, per PCA9685.cpp
+        const span = Math.max(1, center - min + 1);
+        val = Math.round((us - min) * belowDenom / span);
+        val = Math.max(0, Math.min(half - 1, val));
+    } else {
+        const maxVal = is16bit ? 65535 : 255;
+        const span = Math.max(1, max - center + 1);
+        val = half + Math.round((us - center) * half / span);
+        val = Math.max(half, Math.min(maxVal, val));
+    }
+    return Math.max(1, val);
+}
+
+async function scOverlayPut(channel, body) {
+    try {
+        await fetch(`/api/overlays/range/${channel}`, {
+            method:  'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body:    JSON.stringify(body)
+        });
+    } catch (e) {
+        scShowErr('Cannot reach FPP overlay API');
+    }
+}
+
+function scOverlaySetPort(p, val) {
+    if (p.is16bit) {
+        scOverlayPut(p.ch,     { Value: (val >> 8) & 0xFF });
+        scOverlayPut(p.ch + 1, { Value: val & 0xFF });
+    } else {
+        scOverlayPut(p.ch, { Value: val });
+    }
+}
+
+function scOverlayClearPort(p) {
+    // Clearing lets fppd's own idle-channel (value 0) handling apply the
+    // port's configured zero behavior natively — no need to replicate
+    // Hold/Min/Max/Center/Stop logic client-side like the 'other' path does.
+    scOverlayPut(p.ch, { delete: true });
+    if (p.is16bit) scOverlayPut(p.ch + 1, { delete: true });
+}
+
 async function scSave() {
     if (!SC.out) return;
     document.querySelectorAll('.sc-strip').forEach(strip => {
@@ -470,11 +540,16 @@ function scBuildOutView(item) {
         if (p.type !== 'Servo') return;
         const min = p.min ?? 1000, max = p.max ?? 2000;
         ports.push({
-            ch: p.startChannel,
+            // co-pwm.php stores startChannel 0-based (subtracts 1 on save,
+            // adds 1 back for display) — co-other.php stores it 1-based
+            // as-is. Normalize to FPP's real 1-based channel number here.
+            ch: p.startChannel + 1,
             min, max,
             center: p._scCenter ?? Math.round((min + max) / 2),
             description: p.description ?? '',
             zeroBehavior: zbStrToInt(p.zero ?? 'Hold'),
+            is16bit: !!p.is16bit,
+            scaled: (p.dataType ?? 'Scaled') === 'Scaled',
             _rawIdx: i
         });
     });
@@ -486,9 +561,13 @@ function scRender(idx) {
     SC.item = SC.list[idx];
     SC.out  = scBuildOutView(SC.item);
     const rampBtn = document.getElementById('sc-ramp');
-    rampBtn.disabled = (SC.item.source === 'pwm');
-    rampBtn.title = rampBtn.disabled
-        ? 'Not available for native PWM capes — FPP can only test one port at a time on this output'
+    // Ramp needs continuous per-port positioning, which only works via the
+    // channel-overlay path (Scaled data type). Mixed/non-Scaled outputs fall
+    // back to the Min/Max snap test, which can't animate simultaneously.
+    const pwmNeedsSnapOnly = SC.item.source === 'pwm' && SC.out.ports.some(p => !p.scaled);
+    rampBtn.disabled = pwmNeedsSnapOnly;
+    rampBtn.title = pwmNeedsSnapOnly
+        ? 'Not available — one or more ports on this output use a non-Scaled data type, which only supports Min/Max boundary tests'
         : '';
     SC.mute    = {};
     SC.solo    = {};
@@ -511,11 +590,11 @@ function scRender(idx) {
         SC.solo[x] = false;
         SC.flip[x] = false;
         const zb = Number.isInteger(p.zeroBehavior) ? p.zeroBehavior : 0;
-        cont.appendChild(scStrip(x, ch, min, max, ctr, p.description ?? '', zb, absMin, absMax, unit, SC.item.source === 'pwm'));
+        cont.appendChild(scStrip(x, ch, min, max, ctr, p.description ?? '', zb, absMin, absMax, unit, SC.item.source === 'pwm', !!p.scaled));
     });
 }
 
-function scStrip(px, ch, min, max, ctr, desc, zeroBehavior, absMin, absMax, unit, isPwm) {
+function scStrip(px, ch, min, max, ctr, desc, zeroBehavior, absMin, absMax, unit, isPwm, isPwmScaled) {
     const d = document.createElement('div');
     d.className    = 'sc-strip';
     d.id           = `scs${px}`;
@@ -567,7 +646,7 @@ function scStrip(px, ch, min, max, ctr, desc, zeroBehavior, absMin, absMax, unit
         <button class="sc-cap-btn sc-cap-ctr" title="Set Center to current fader position">Ctr</button>
         <button class="sc-cap-btn sc-cap-max" title="Set Max to current fader position">Max</button>
       </div>
-      ${isPwm ? `
+      ${isPwm && !isPwmScaled ? `
       <div class="sc-capture-wrap">
         <span class="sc-cap-lbl">Test→</span>
         <button class="sc-cap-btn sc-pwm-min" title="Command this port to its configured Min (fppd boundary test — Enable Test first)">Min</button>
@@ -605,9 +684,13 @@ function scStrip(px, ch, min, max, ctr, desc, zeroBehavior, absMin, absMax, unit
     const nctr = d.querySelector('.sc-ncenter');
 
     if (isPwm) {
-        fdr.title = 'Native PWM cape: fppd only supports Min/Max boundary tests, not live positioning — use the Test buttons below';
-        d.querySelector('.sc-pwm-min')?.addEventListener('click', () => scPwmTestBoundary(px, true));
-        d.querySelector('.sc-pwm-max')?.addEventListener('click', () => scPwmTestBoundary(px, false));
+        if (isPwmScaled) {
+            fdr.title = 'Native PWM cape — live position via FPP channel overlay (Enable Test first)';
+        } else {
+            fdr.title = 'Native PWM cape: this port\'s data type only supports Min/Max boundary tests, not live positioning — use the Test buttons below';
+            d.querySelector('.sc-pwm-min')?.addEventListener('click', () => scPwmTestBoundary(px, true));
+            d.querySelector('.sc-pwm-max')?.addEventListener('click', () => scPwmTestBoundary(px, false));
+        }
     }
 
     // ── Fader (test only, does not mark dirty)
@@ -843,7 +926,13 @@ async function scToggleTest() {
     b.classList.toggle('on', SC.on);
     if (SC.on) {
         if (SC.item.source === 'pwm') {
-            // fppd owns the hardware for native PWM capes — nothing to claim.
+            // Overlay values are decoded by fppd using its own on-disk
+            // min/center/max — save first so what we're about to encode
+            // against matches what fppd actually has loaded.
+            b.disabled = true;
+            b.textContent = 'Saving…';
+            await scSave();
+            b.disabled = false;
             b.textContent = '■ Test Active';
             return;
         }
@@ -861,10 +950,13 @@ async function scToggleTest() {
         b.textContent = '■ Test Active';
     } else {
         scRampStop();
-        scApplyZeroBehaviors();
         if (SC.item.source === 'pwm') {
+            // Clearing the overlay lets fppd's own idle-channel handling
+            // apply each port's configured zero behavior natively.
+            SC.out.ports.forEach(p => { if (p.scaled) scOverlayClearPort(p); });
             scPwmTestStop();
         } else {
+            scApplyZeroBehaviors();
             await scCmd({ action: 'close' }).catch(() => null);
         }
     }
