@@ -189,7 +189,7 @@ input[type="range"].sc-v {
 const SC = {
     on: false, ramp: false,
     mute: {}, solo: {}, flip: {}, dirty: {}, phases: {}, clipboard: null,
-    out: null, outIdx: 0, data: null, list: [], activeStrip: -1
+    out: null, item: null, dataOther: null, dataPwm: null, list: [], activeStrip: -1
 };
 let scRampInterval  = null;
 let scRampStartTime = null;
@@ -197,45 +197,84 @@ let scRampInFlight  = false;
 
 /* ── FPP API ──────────────────────────────────────────────── */
 
+function scShowErr(msg) {
+    const el = document.getElementById('sc-savemsg');
+    if (!el) return;
+    el.style.color = '#e63946';
+    el.textContent = '✗ ' + msg;
+    clearTimeout(scShowErr._t);
+    scShowErr._t = setTimeout(() => { el.textContent = ''; }, 6000);
+}
+
 async function scCmd(payload) {
-    await fetch('plugin.php?plugin=fpp-servo-calibrator&page=cmd.php', {
-        method:  'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body:    JSON.stringify({ out: SC.outIdx, ...payload })
-    }).catch(() => {});
+    try {
+        const r = await fetch('/fpp-servo-calibrator-api/', {
+            method:  'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body:    JSON.stringify({ out: SC.item.otherIdx, ...payload })
+        });
+        const d = await r.json().catch(() => null);
+        if (d && d.status === 'error') scShowErr(d.message);
+        return d;
+    } catch (e) {
+        scShowErr('Cannot reach servo daemon');
+        return null;
+    }
 }
 
 async function scSendCh(port, us) {
     us = Math.max(0, Math.min(4000, Math.round(us)));
-    await scCmd({ action: 'set', port, us });
+    if (SC.item.source === 'pwm') {
+        scPwmTestStart(SC.out.ports[port]._rawIdx, us, true);
+    } else {
+        await scCmd({ action: 'set', port, us });
+    }
 }
 
 async function scSendAll(channels) {
-    if (!channels.length) return;
-    await fetch('plugin.php?plugin=fpp-servo-calibrator&page=cmd.php', {
-        method:  'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body:    JSON.stringify({ out: SC.outIdx, action: 'set_all', channels })
-    }).catch(() => {});
+    // Native PWM capes can only manipulate one port per command; Ramp Test
+    // (the only caller that sends multiple channels at once) is disabled
+    // for that source, so this path is co-other only.
+    if (!channels.length || SC.item.source !== 'other') return;
+    try {
+        const r = await fetch('/fpp-servo-calibrator-api/', {
+            method:  'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body:    JSON.stringify({ out: SC.item.otherIdx, action: 'set_all', channels })
+        });
+        const d = await r.json().catch(() => null);
+        if (d && d.status === 'error') scShowErr(d.message);
+    } catch (e) {
+        scShowErr('Cannot reach servo daemon');
+    }
 }
 
 async function scStop() {
     if (!SC.out) return;
-    await scCmd({ action: 'stop' });
+    if (SC.item.source === 'pwm') {
+        scPwmTestStop();
+    } else {
+        await scCmd({ action: 'stop' });
+    }
     document.querySelectorAll('.sc-strip').forEach(s => s.classList.remove('sc-active'));
     SC.activeStrip = -1;
 }
 
 async function scApplyZeroBehaviors() {
     if (!SC.out) return;
+    // Native PWM capes (fppd-driven) apply their own saved zero behavior
+    // whenever we're not actively manipulating a port — nothing to send here.
+    if (SC.item.source !== 'other') return;
     const channels = [];
     document.querySelectorAll('.sc-strip').forEach(strip => {
         const px  = +strip.dataset.port;
         const zb  = parseInt(strip.querySelector('.sc-zbsel')?.value ?? '0', 10);
         const mn  = +strip.querySelector('.sc-rmin').value;
+        const mx  = +strip.querySelector('.sc-rmax').value;
         const ctr = +strip.querySelector('.sc-rcenter').value;
-        if      (zb === 1) channels.push({ port: px, us: mn  });  // Normal → min (ch=0 position)
-        else if (zb === 2) channels.push({ port: px, us: ctr });  // To Center
+        if      (zb === 1) channels.push({ port: px, us: mn  });  // Min
+        else if (zb === 4) channels.push({ port: px, us: mx  });  // Max
+        else if (zb === 2) channels.push({ port: px, us: ctr });  // Center
         else if (zb === 3) channels.push({ port: px, us: 0   });  // Stop PWM → no signal
         // 0 (Hold) → keep last I2C output, no command needed
     });
@@ -245,21 +284,105 @@ async function scApplyZeroBehaviors() {
 }
 
 async function scLoad() {
-    const r = await fetch('/api/channel/output/co-other').catch(() => null);
-    if (!r?.ok) {
+    const [rOther, rPwm] = await Promise.all([
+        fetch('/api/channel/output/co-other').catch(() => null),
+        fetch('/api/channel/output/co-pwm').catch(() => null)
+    ]);
+    if (!rOther?.ok && !rPwm?.ok) {
         document.getElementById('sc-output').innerHTML = '<option>Error loading outputs</option>';
         return;
     }
-    SC.data = await r.json();
-    // Show any output that has a ports array (PCA9685, K2-Pi-Servo, etc.)
-    SC.list = (SC.data.channelOutputs || []).filter(o => o.ports && o.ports.length > 0);
+    SC.dataOther = rOther?.ok ? await rOther.json() : { channelOutputs: [] };
+    SC.dataPwm   = rPwm?.ok   ? await rPwm.json()   : { channelOutputs: [] };
+
+    SC.list = [];
+    // Generic add-on boards (PCA9685 "Other" output) — direct I2C, own daemon.
+    let otherIdx = 0;
+    (SC.dataOther.channelOutputs || []).forEach(o => {
+        if (o.ports && o.ports.length > 0) {
+            SC.list.push({ source: 'other', ref: o, otherIdx: otherIdx++ });
+        }
+    });
+    // Native PWM/Servo capes (e.g. Kulp K2-Pi-Servo) — fppd owns the hardware,
+    // so these are driven via FPP's own "Test Start" command, not raw I2C.
+    (SC.dataPwm.channelOutputs || []).forEach(o => {
+        const servoOutputs = (o.outputs || []).filter(p => p.type === 'Servo');
+        if (o.enabled && servoOutputs.length > 0) {
+            SC.list.push({ source: 'pwm', ref: o });
+        }
+    });
+
     const sel = document.getElementById('sc-output');
     sel.innerHTML = '<option value="">Select servo output…</option>';
-    SC.list.forEach((o, i) => {
-        const end = o.startChannel + o.channelCount - 1;
-        sel.innerHTML += `<option value="${i}">${o.type}  Ch ${o.startChannel}–${end}  (${o.channelCount} ch)</option>`;
+    SC.list.forEach((item, i) => {
+        const o = item.ref;
+        let label;
+        if (item.source === 'other') {
+            const end = o.startChannel + o.channelCount - 1;
+            label = `${o.type}  Ch ${o.startChannel}–${end}  (${o.channelCount} ch)`;
+        } else {
+            const n = o.outputs.filter(p => p.type === 'Servo').length;
+            label = `${o.subType || o.type}  ${n} servo ch  [native PWM]`;
+        }
+        sel.innerHTML += `<option value="${i}">${label}</option>`;
     });
     if (SC.list.length === 1) { sel.value = '0'; scRender(0); }
+}
+
+/* ── Zero-behavior string (co-pwm) <-> int (calibrator UI) ──── */
+// Int codes are fixed for backward compatibility with existing co-other.json
+// saves: 0 Hold, 1 Min, 2 Center, 3 Stop PWM, 4 Max (new).
+const ZB_INT_TO_STR = ['Hold', 'Min', 'Center', 'Stop PWM', 'Max'];
+const ZB_STR_TO_INT = { Hold: 0, Min: 1, Center: 2, 'Stop PWM': 3, Max: 4 };
+function zbIntToStr(i) { return ZB_INT_TO_STR[i] ?? 'Hold'; }
+function zbStrToInt(s) { return ZB_STR_TO_INT.hasOwnProperty(s) ? ZB_STR_TO_INT[s] : 0; }
+
+/* ── Native PWM cape live test (FPP "Test Start"/"Test Stop" command) ─────
+ * fppd drives cape PWM hardware directly; there is no I2C bus for us to open,
+ * so live preview must go through FPP's own output-specific test command
+ * (the same one co-pwm.php uses for its range-limit preview slider). That
+ * command only supports manipulating ONE port per call — confirmed from
+ * co-pwm.php's client-side use; the exact fppd-side interpretation of
+ * `isMin` is not visible from here, so this is inferred from the existing
+ * front-end and should be confirmed against real hardware. */
+function scPwmBuildConfig(manipulation) {
+    const o = SC.item.ref;
+    const cfg = {
+        type: o.type, subType: o.subType, enabled: o.enabled, frequency: o.frequency,
+        startChannel: 0, channelCount: -1,
+        outputs: o.outputs.map(p => {
+            const out = { description: p.description, startChannel: p.startChannel, is16bit: p.is16bit, type: p.type };
+            if (p.type === 'LED') {
+                out.brightness = p.brightness; out.gamma = p.gamma; out.reverse = p.reverse;
+            } else {
+                out.min = p.min; out.max = p.max; out.reverse = p.reverse; out.zero = p.zero; out.dataType = p.dataType;
+            }
+            return out;
+        })
+    };
+    if (manipulation) cfg.manipulation = manipulation;
+    return cfg;
+}
+
+async function scPwmCommand(command, args) {
+    try {
+        await fetch('api/command', {
+            method:  'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body:    JSON.stringify({ command, multisyncCommand: false, multisyncHosts: '', args })
+        });
+    } catch (e) {
+        scShowErr('Cannot reach FPP command API');
+    }
+}
+
+function scPwmTestStart(rawPortIdx, value, isMin) {
+    const cfg = scPwmBuildConfig({ port: rawPortIdx, value: Math.round(value), isMin: !!isMin });
+    scPwmCommand('Test Start', ['2000', 'Output Specific', 'PCA9685 PWM', '1', JSON.stringify(cfg)]);
+}
+
+function scPwmTestStop() {
+    scPwmCommand('Test Stop', []);
 }
 
 async function scSave() {
@@ -286,10 +409,29 @@ async function scSave() {
         SC.out.ports[p].description  = strip.querySelector('.sc-desc').value;
         SC.out.ports[p].zeroBehavior = parseInt(strip.querySelector('.sc-zbsel').value, 10);
     });
-    const resp = await fetch('/api/channel/output/co-other', {
+
+    let endpoint, payload;
+    if (SC.item.source === 'pwm') {
+        // Copy the normalized view back into the real co-pwm outputs[] entries.
+        SC.out.ports.forEach(p => {
+            const raw = SC.item.ref.outputs[p._rawIdx];
+            raw.min         = p.min;
+            raw.max         = p.max;
+            raw.description = p.description;
+            raw.zero        = zbIntToStr(p.zeroBehavior);
+            raw._scCenter   = p.center; // extra field, ignored by FPP itself
+        });
+        endpoint = '/api/channel/output/co-pwm';
+        payload  = SC.dataPwm;
+    } else {
+        endpoint = '/api/channel/output/co-other';
+        payload  = SC.dataOther;
+    }
+
+    const resp = await fetch(endpoint, {
         method:  'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(SC.data)
+        body: JSON.stringify(payload)
     }).catch(() => null);
     const el = document.getElementById('sc-savemsg');
     if (resp?.ok) {
@@ -297,7 +439,7 @@ async function scSave() {
         el.textContent = '✓ Saved';
         document.querySelectorAll('.sc-strip').forEach(s => s.classList.remove('sc-dirty'));
         SC.dirty = {};
-        scCmd({ action: 'reload' }); // tell daemon to re-read co-other.json
+        if (SC.item.source === 'other') scCmd({ action: 'reload' }); // tell daemon to re-read co-other.json
     } else {
         el.style.color = '#e63946';
         el.textContent = '✗ Failed';
@@ -307,10 +449,41 @@ async function scSave() {
 
 /* ── Render ───────────────────────────────────────────────── */
 
+// Normalizes either an 'other' (co-other.json) or 'pwm' (co-pwm.json) output
+// into the { asUsec, startChannel, ports: [...] } shape scRender/scStrip expect.
+// For 'other', ports are the SAME objects as the source JSON (mutations in
+// scSave write straight through). For 'pwm', ports are a derived view tagged
+// with _rawIdx so scSave can copy edits back into the real outputs[] entries.
+function scBuildOutView(item) {
+    const o = item.ref;
+    if (item.source === 'other') {
+        return { asUsec: !!o.asUsec, startChannel: o.startChannel, ports: o.ports };
+    }
+    const ports = [];
+    o.outputs.forEach((p, i) => {
+        if (p.type !== 'Servo') return;
+        const min = p.min ?? 1000, max = p.max ?? 2000;
+        ports.push({
+            ch: p.startChannel,
+            min, max,
+            center: p._scCenter ?? Math.round((min + max) / 2),
+            description: p.description ?? '',
+            zeroBehavior: zbStrToInt(p.zero ?? 'Hold'),
+            _rawIdx: i
+        });
+    });
+    return { asUsec: true, startChannel: 0, ports };
+}
+
 function scRender(idx) {
     scRampStop();
-    SC.out     = SC.list[idx];
-    SC.outIdx  = idx;
+    SC.item = SC.list[idx];
+    SC.out  = scBuildOutView(SC.item);
+    const rampBtn = document.getElementById('sc-ramp');
+    rampBtn.disabled = (SC.item.source === 'pwm');
+    rampBtn.title = rampBtn.disabled
+        ? 'Not available for native PWM capes — FPP can only test one port at a time on this output'
+        : '';
     SC.mute    = {};
     SC.solo    = {};
     SC.flip    = {};
@@ -327,7 +500,7 @@ function scRender(idx) {
         const min = p.min    ?? 1000;
         const max = p.max    ?? 2000;
         const ctr = p.center ?? Math.round((min + max) / 2);
-        const ch  = SC.out.startChannel + x;
+        const ch  = (p.ch !== undefined) ? p.ch : SC.out.startChannel + x;
         SC.mute[x] = false;
         SC.solo[x] = false;
         SC.flip[x] = false;
@@ -392,8 +565,9 @@ function scStrip(px, ch, min, max, ctr, desc, zeroBehavior, absMin, absMax, unit
         <span class="sc-zb-lbl">Zero</span>
         <select class="sc-zbsel" title="Behavior when test mode is disabled">
           <option value="0"${zeroBehavior === 0 ? ' selected' : ''}>Hold</option>
-          <option value="1"${zeroBehavior === 1 ? ' selected' : ''}>Normal</option>
-          <option value="2"${zeroBehavior === 2 ? ' selected' : ''}>To Center</option>
+          <option value="1"${zeroBehavior === 1 ? ' selected' : ''}>Min</option>
+          <option value="4"${zeroBehavior === 4 ? ' selected' : ''}>Max</option>
+          <option value="2"${zeroBehavior === 2 ? ' selected' : ''}>Center</option>
           <option value="3"${zeroBehavior === 3 ? ' selected' : ''}>Stop PWM</option>
         </select>
       </div>
@@ -644,12 +818,38 @@ function scComputePhases() {
 
 /* ── Test controls ────────────────────────────────────────── */
 
-function scToggleTest() {
+async function scToggleTest() {
     SC.on = !SC.on;
     const b = document.getElementById('sc-enable');
     b.textContent = SC.on ? '■ Test Active' : 'Enable Test';
     b.classList.toggle('on', SC.on);
-    if (!SC.on) { scRampStop(); scApplyZeroBehaviors(); }
+    if (SC.on) {
+        if (SC.item.source === 'pwm') {
+            // fppd owns the hardware for native PWM capes — nothing to claim.
+            b.textContent = '■ Test Active';
+            return;
+        }
+        b.disabled = true;
+        b.textContent = 'Opening…';
+        const r = await scCmd({ action: 'open' }).catch(() => null);
+        b.disabled = false;
+        if (!r || r.status !== 'ok') {
+            SC.on = false;
+            b.textContent = 'Enable Test';
+            b.classList.remove('on');
+            alert('Could not claim I2C bus: ' + (r?.message || 'daemon not responding'));
+            return;
+        }
+        b.textContent = '■ Test Active';
+    } else {
+        scRampStop();
+        scApplyZeroBehaviors();
+        if (SC.item.source === 'pwm') {
+            scPwmTestStop();
+        } else {
+            await scCmd({ action: 'close' }).catch(() => null);
+        }
+    }
 }
 
 async function scCenterAll() {
