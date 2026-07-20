@@ -34,6 +34,7 @@ class LiveTrackingMode:
         self._sx: float   = 0.5
         self._sy: float   = 0.5
         self._has_subject = False
+        self._last_seen_ts = 0.0
 
         self._servo_thread: threading.Thread = None
 
@@ -114,32 +115,38 @@ class LiveTrackingMode:
         lt_cfg     = self._cfg.get('live_tracking', {})
         track_mode = lt_cfg.get('tracking_mode', 'face')
         smoothing  = lt_cfg.get('face_smoothing', 0.6)
+        lost_grace = lt_cfg.get('lost_grace_sec', 0.5)
         servo_cfgs = self._cfg.get('servos', {})
         pan_cfg    = servo_cfgs.get('pan',  {})
         tilt_cfg   = servo_cfgs.get('tilt', {})
 
         # Resolve subject position
+        fx = fy = None
         if track_mode == 'face':
-            if not result.face_detected:
-                with self._lock:
-                    self._has_subject = False
-                return
-            fx, fy = result.face_center_x, result.face_center_y
+            if result.face_detected:
+                fx, fy = result.face_center_x, result.face_center_y
         elif track_mode == 'body':
-            if not result.body_detected:
-                with self._lock:
-                    self._has_subject = False
-                return
-            fx, fy = result.body_center_x, result.body_center_y
+            if result.body_detected:
+                fx, fy = result.body_center_x, result.body_center_y
         else:  # face_or_body
             if result.face_detected:
                 fx, fy = result.face_center_x, result.face_center_y
             elif result.body_detected:
                 fx, fy = result.body_center_x, result.body_center_y
-            else:
-                with self._lock:
+
+        now = time.time()
+        if fx is None:
+            # Brief dropout: keep steering toward the last known position
+            # instead of freezing then snapping on reacquire. Mediapipe only
+            # runs ~5 FPS on a Pi, so even a single missed detection frame is
+            # ~200ms — without this grace window that reads as flicker rather
+            # than a smooth loss of tracking, especially for face detection
+            # (more prone to single-frame misses than body/pose detection).
+            with self._lock:
+                if self._has_subject and (now - self._last_seen_ts) > lost_grace:
                     self._has_subject = False
-                return
+            return
+        self._last_seen_ts = now
 
         # Apply invert
         if pan_cfg.get('invert', False):
