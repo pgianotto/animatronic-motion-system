@@ -363,7 +363,11 @@ def _ensure_model(path: Path, url: str, label: str) -> bool:
     try:
         print(f"[Tracker] Downloading {label} model ...")
         path.parent.mkdir(parents=True, exist_ok=True)
-        urllib.request.urlretrieve(url, path)
+        # urlretrieve has no timeout — a hung/stalled server would block
+        # tracker startup (and whatever hook triggered it) indefinitely.
+        with urllib.request.urlopen(url, timeout=30) as resp:
+            data = resp.read()
+        path.write_bytes(data)
         print(f"[Tracker] Saved: {path}")
         return True
     except Exception as exc:
