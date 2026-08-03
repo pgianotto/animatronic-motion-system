@@ -971,6 +971,20 @@ def api_sess_frames():
         'servo_mapped': list(daemon.cfg.get('joint_map', {}).keys()),
     })
 
+@app.route('/api/session/frames/channel/<key>')
+def api_sess_frames_channel(key):
+    """Return full-resolution (no downsampling) per-frame values for one channel."""
+    frames = daemon._capture.get_frames()
+    if not frames:
+        return jsonify({'ok': False, 'error': 'no frames'})
+    return jsonify({
+        'ok': True, 'channel': key,
+        'total_frames': len(frames),
+        'duration':     round(frames[-1].timestamp, 2),
+        'timestamps':   [round(f.timestamp, 3) for f in frames],
+        'values':       [round(f.values.get(key, 0.0), 3) for f in frames],
+    })
+
 
 @app.route('/api/playback/seek', methods=['POST'])
 def api_pb_seek():

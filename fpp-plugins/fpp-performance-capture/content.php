@@ -157,6 +157,22 @@ $step_time_ms = intval($cfg['step_time_ms'] ?? 50);
 .exp-tab.active { color:var(--cyan); border-bottom-color:var(--cyan); }
 .exp-panel      { display:none; }
 .exp-panel.active { display:block; }
+
+/* ── Per-channel curve editor (modal) ───────────────────────────────────────── */
+.ce-overlay { display:none; position:fixed; inset:0; background:rgba(0,0,0,.6);
+              z-index:50; align-items:center; justify-content:center; }
+.ce-modal   { background:var(--panel); border-radius:8px; padding:18px;
+              width:90vw; max-width:1200px; height:78vh; display:flex; flex-direction:column; }
+.ce-hdr     { display:flex; align-items:center; justify-content:space-between; margin-bottom:10px; }
+.ce-hdr h3  { margin:0; }
+.ce-close   { background:none; border:none; color:var(--muted); font-size:20px; cursor:pointer; line-height:1; }
+.ce-close:hover { color:var(--fg); }
+.ce-toolbar { display:flex; align-items:center; gap:6px; flex-wrap:wrap; margin-bottom:8px; }
+.ce-tool-btn.active { background:var(--cyan); color:#000; border-color:var(--cyan); }
+.ce-locked-note { color:var(--amber); font-size:11px; }
+#ce-canvas  { display:block; width:100%; flex:1; min-height:0; cursor:crosshair;
+              border-radius:4px; background:var(--dark); }
+.ce-transport { display:flex; gap:5px; align-items:center; flex-wrap:wrap; margin-top:8px; }
 </style>
 
 <div class="pc-wrap">
@@ -453,6 +469,7 @@ $step_time_ms = intval($cfg['step_time_ms'] ?? 50);
   <div style="display:flex; gap:6px; align-items:center; flex-wrap:wrap; margin-bottom:8px;">
     <button class="pc-btn btn-ghost btn-sm" id="btn-edit-mode" onclick="toggleEditMode()">✎ Draw</button>
     <span id="lock-status" style="color:var(--amber); font-size:11px;"></span>
+    <span style="color:#444; font-size:11px; margin-left:auto;">Click a channel name for a larger editor</span>
   </div>
 
   <input type="range" class="pc-scrub" id="scrub-slider"
@@ -550,6 +567,37 @@ $step_time_ms = intval($cfg['step_time_ms'] ?? 50);
 </div>
 
 </div><!-- /tab-review -->
+
+<!-- ══ Per-channel curve editor (modal) ══════════════════════════════════════ -->
+<div class="ce-overlay" id="ce-overlay">
+  <div class="ce-modal">
+    <div class="ce-hdr">
+      <h3 id="ce-title">Channel</h3>
+      <button class="ce-close" onclick="closeChannelEditor()">×</button>
+    </div>
+    <div class="ce-toolbar" id="ce-toolbar">
+      <button class="pc-btn btn-ghost btn-sm ce-tool-btn" id="ce-tool-draw"    onclick="ceSetTool('draw')">✎ Draw</button>
+      <button class="pc-btn btn-ghost btn-sm ce-tool-btn" id="ce-tool-point"   onclick="ceSetTool('point')">● Add Point</button>
+      <button class="pc-btn btn-ghost btn-sm ce-tool-btn" id="ce-tool-scissors" onclick="ceSetTool('scissors')">✂ Scissors</button>
+      <span style="color:#2a2a4a; margin:0 2px;">|</span>
+      <button class="pc-btn btn-play btn-sm" id="ce-btn-apply" onclick="ceApplyPoints()" disabled>Apply Points</button>
+      <button class="pc-btn btn-ghost btn-sm" id="ce-btn-cancel" onclick="ceCancelPoints()" disabled>Cancel</button>
+      <span style="color:#2a2a4a; margin:0 2px;">|</span>
+      <span style="color:var(--muted); font-size:11px;">Smooth window</span>
+      <input type="number" class="pc-input" id="ce-smooth-window" value="5" min="2" max="60" style="width:55px;">
+      <button class="pc-btn btn-ghost btn-sm" id="ce-btn-smooth" onclick="ceSmooth()">〜 Smooth</button>
+      <span id="ce-locked-note" class="ce-locked-note" style="display:none;">🔒 Channel is locked — unlock it in the timeline to edit</span>
+      <span id="ce-msg" class="pc-msg" style="margin-left:auto;"></span>
+    </div>
+    <canvas id="ce-canvas"></canvas>
+    <div class="ce-transport">
+      <button class="pc-btn btn-play  btn-sm" onclick="tlPlay()">▶ Play</button>
+      <button class="pc-btn btn-pause btn-sm" onclick="tlPause()">⏸ Pause</button>
+      <button class="pc-btn btn-halt  btn-sm" onclick="tlStop()">■ Stop</button>
+      <input type="range" class="pc-scrub" id="ce-scrub-slider" style="flex:1;" min="0" max="1" value="0" oninput="onScrub(this.value)">
+    </div>
+  </div>
+</div>
 
 </div><!-- .pc-wrap -->
 
@@ -878,8 +926,8 @@ function toggleEditMode() {
 }
 
 function patchChannel(channel, edits) {
-  if (!channel || !edits || !edits.length) return;
-  fetch(API + '/api/session/frames/patch', {
+  if (!channel || !edits || !edits.length) return Promise.resolve();
+  return fetch(API + '/api/session/frames/patch', {
     method: 'POST', headers: {'Content-Type': 'application/json'},
     body: JSON.stringify({channel, edits})
   }).then(r => r.json()).then(d => {
@@ -918,6 +966,281 @@ function toggleChannelLock(key) {
   WF.draw();
 }
 
+// ── Per-channel curve editor (modal) ───────────────────────────────────────────
+const CE = {
+  key: null, full: null, tool: 'draw',
+  points: [],                       // staged {frame, value} keyframes for the Add Point tool
+  RULER_H: 22, VAL_W: 60, PAD: 8,
+  _drawing: false, _drawEdits: [], _drawSnapshot: null,
+};
+
+function openChannelEditor(key) {
+  CE.key = key; CE.tool = 'draw'; CE.points = [];
+  CE._drawing = false; CE._drawEdits = []; CE._drawSnapshot = null;
+  const j = JOINTS.find(j => j.key === key);
+  CE.color = j ? (j.group === 'face' ? WF.FACE_COL : WF.BODY_COL) : '#4cc9f0';
+  document.getElementById('ce-title').textContent = j ? j.label : key;
+  document.getElementById('ce-overlay').style.display = 'flex';
+  document.getElementById('ce-locked-note').style.display = _locked[key] ? '' : 'none';
+  const disable = !!_locked[key];
+  ['ce-tool-draw','ce-tool-point','ce-tool-scissors','ce-btn-smooth'].forEach(id => {
+    const b = document.getElementById(id); if (b) b.disabled = disable;
+  });
+  document.getElementById('ce-smooth-window').disabled = disable;
+  ceSetTool('draw');
+  ceUpdatePointButtons();
+  const msg = document.getElementById('ce-msg');
+  if (msg) msg.textContent = '';
+  ceLoadChannel(key);
+}
+
+function closeChannelEditor() {
+  if (CE.points.length && !confirm('Discard unapplied points?')) return;
+  document.getElementById('ce-overlay').style.display = 'none';
+}
+
+function ceLoadChannel(key) {
+  fetch(API + '/api/session/frames/channel/' + encodeURIComponent(key))
+    .then(r => r.json())
+    .then(d => { CE.full = d; ceDraw(); })
+    .catch(() => {});
+}
+
+function ceSetTool(tool) {
+  if (_locked[CE.key] && tool !== 'draw') return;
+  CE.tool = tool;
+  ['draw','point','scissors'].forEach(t =>
+    document.getElementById('ce-tool-' + t).classList.toggle('active', t === tool));
+  ceDraw();
+}
+
+function ceUpdatePointButtons() {
+  document.getElementById('ce-btn-apply').disabled  = CE.points.length < 2;
+  document.getElementById('ce-btn-cancel').disabled = CE.points.length === 0;
+}
+
+function ceApplyPoints() {
+  if (CE.points.length < 2 || !CE.full) return;
+  const snapshot = [...CE.full.values];
+  const fs  = CE.points.map(p => p.frame);
+  const lo  = Math.max(0, Math.min(...fs));
+  const hi  = Math.min(CE.full.total_frames - 1, Math.max(...fs));
+  const undoEdits = [];
+  for (let f = lo; f <= hi; f++) undoEdits.push({frame: f, value: snapshot[f]});
+  if (undoEdits.length) { _undoStack.push({channel: CE.key, edits: undoEdits}); updateUndoBtn(); }
+  patchChannel(CE.key, [...CE.points]).then(() => ceLoadChannel(CE.key));
+  CE.points = [];
+  ceUpdatePointButtons();
+}
+
+function ceCancelPoints() {
+  CE.points = [];
+  ceUpdatePointButtons();
+  ceDraw();
+}
+
+function ceSmooth() {
+  if (!CE.full || _locked[CE.key]) return;
+  const win = Math.max(2, parseInt(document.getElementById('ce-smooth-window').value, 10) || 5);
+  const vals = CE.full.values;
+  const n    = vals.length;
+  if (n < 3) return;
+  const smoothed = new Array(n);
+  const half = Math.floor(win / 2);
+  for (let i = 0; i < n; i++) {
+    let sum = 0, count = 0;
+    for (let k = Math.max(0, i - half); k <= Math.min(n - 1, i + half); k++) { sum += vals[k]; count++; }
+    smoothed[i] = sum / count;
+  }
+  const undoEdits = vals.map((v, i) => ({frame: i, value: v}));
+  _undoStack.push({channel: CE.key, edits: undoEdits}); updateUndoBtn();
+  const edits = smoothed.map((v, i) => ({frame: i, value: v}));
+  const msg = document.getElementById('ce-msg');
+  if (msg) { msg.style.color = '#888'; msg.textContent = 'Smoothing…'; }
+  patchChannel(CE.key, edits).then(() => {
+    ceLoadChannel(CE.key);
+    if (msg) { msg.style.color = '#06d6a0'; msg.textContent = '✓ Smoothed'; setTimeout(() => msg.textContent = '', 3000); }
+  });
+}
+
+function ceCanvasSize() {
+  const canvas = document.getElementById('ce-canvas');
+  return {canvas, cssW: canvas.clientWidth || 800, cssH: canvas.clientHeight || 400};
+}
+
+function ceFrameValueAt(x, y, cssW, cssH) {
+  const waveW = Math.max(cssW - CE.VAL_W, 1);
+  const frac  = Math.max(0, Math.min(1, x / waveW));
+  const frame = Math.round(frac * (CE.full.total_frames - 1));
+  const top   = CE.RULER_H, areaH = cssH - top;
+  let lo = Math.min(...CE.full.values), hi = Math.max(...CE.full.values);
+  if (hi - lo < 1e-4) { lo -= 0.5; hi += 0.5; }
+  const yFrac = 1 - Math.max(0, Math.min(1, (y - top - CE.PAD) / (areaH - 2 * CE.PAD)));
+  const value = lo + yFrac * (hi - lo);
+  return {frame, value};
+}
+
+function ceDrawAtPoint(x, y, cssW, cssH) {
+  if (_locked[CE.key] || !CE.full) return;
+  if (!CE._drawSnapshot) CE._drawSnapshot = [...CE.full.values];
+  const {frame, value} = ceFrameValueAt(x, y, cssW, cssH);
+  const last = CE._drawEdits[CE._drawEdits.length - 1];
+  if (last && last.frame === frame) { last.value = value; }
+  else { CE._drawEdits.push({frame, value}); }
+  if (CE._drawEdits.length >= 2) {
+    const prev = CE._drawEdits[CE._drawEdits.length - 2];
+    const curr = CE._drawEdits[CE._drawEdits.length - 1];
+    const lo = Math.min(prev.frame, curr.frame), hi = Math.max(prev.frame, curr.frame);
+    for (let f = lo; f <= hi; f++) {
+      const t = hi === lo ? 0 : (f - lo) / (hi - lo);
+      CE.full.values[f] = (prev.frame <= curr.frame ? prev.value : curr.value) * (1 - t) +
+                           (prev.frame <= curr.frame ? curr.value : prev.value) * t;
+    }
+  } else {
+    CE.full.values[frame] = value;
+  }
+  ceDraw();
+}
+
+function ceCommitDraw() {
+  if (CE._drawing && CE._drawEdits.length > 0 && CE._drawSnapshot) {
+    const fs = CE._drawEdits.map(e => e.frame);
+    const lo = Math.max(0, Math.min(...fs));
+    const hi = Math.min(CE.full.total_frames - 1, Math.max(...fs));
+    const undoEdits = [];
+    for (let f = lo; f <= hi; f++) undoEdits.push({frame: f, value: CE._drawSnapshot[f]});
+    if (undoEdits.length) { _undoStack.push({channel: CE.key, edits: undoEdits}); updateUndoBtn(); }
+    patchChannel(CE.key, [...CE._drawEdits]).then(() => ceLoadChannel(CE.key));
+  }
+  CE._drawing = false; CE._drawEdits = []; CE._drawSnapshot = null;
+}
+
+function ceDraw() {
+  const {canvas, cssW, cssH} = ceCanvasSize();
+  const dpr = window.devicePixelRatio || 1;
+  canvas.width  = cssW * dpr;
+  canvas.height = cssH * dpr;
+  const ctx = canvas.getContext('2d');
+  ctx.scale(dpr, dpr);
+  ctx.fillStyle = '#0d0d1f'; ctx.fillRect(0, 0, cssW, cssH);
+
+  if (!CE.full || !CE.full.ok || !CE.full.total_frames) {
+    ctx.fillStyle = '#555'; ctx.font = '13px sans-serif'; ctx.textAlign = 'center';
+    ctx.fillText('No data', cssW / 2, cssH / 2);
+    return;
+  }
+
+  const waveW = Math.max(cssW - CE.VAL_W, 1);
+  const dur   = CE.full.duration || 1;
+  const vals  = CE.full.values;
+  const ts    = CE.full.timestamps;
+
+  ctx.fillStyle = '#080816'; ctx.fillRect(0, 0, cssW, CE.RULER_H);
+  const tick = [0.1,0.5,1,2,5,10,30,60].find(m => dur/m <= 14) || 60;
+  ctx.strokeStyle = '#333'; ctx.lineWidth = 1;
+  ctx.fillStyle = '#666'; ctx.font = '10px monospace'; ctx.textAlign = 'center';
+  for (let t = 0; t <= dur + tick*0.01; t += tick) {
+    const rx = (t / dur) * waveW;
+    ctx.beginPath(); ctx.moveTo(rx, CE.RULER_H-5); ctx.lineTo(rx, CE.RULER_H); ctx.stroke();
+    const mm = Math.floor(t/60), ss = (t%60).toFixed(1).padStart(4,'0');
+    ctx.fillText(`${mm}:${ss}`, rx, CE.RULER_H-6);
+  }
+
+  const top = CE.RULER_H, areaH = cssH - top;
+  let lo = Math.min(...vals), hi = Math.max(...vals);
+  if (hi - lo < 1e-4) { lo -= 0.5; hi += 0.5; }
+  const span = hi - lo;
+  const yFor = v => top + areaH - CE.PAD - ((v-lo)/span) * (areaH - 2*CE.PAD);
+
+  if (lo <= 0 && 0 <= hi) {
+    ctx.strokeStyle = '#2a2a50'; ctx.lineWidth = 1; ctx.setLineDash([4,5]);
+    ctx.beginPath(); ctx.moveTo(0, yFor(0)); ctx.lineTo(waveW, yFor(0)); ctx.stroke();
+    ctx.setLineDash([]);
+  }
+
+  ctx.strokeStyle = CE.color || '#4cc9f0'; ctx.lineWidth = 1.5; ctx.beginPath();
+  ts.forEach((t, i) => {
+    const x = (t / dur) * waveW, y = yFor(vals[i] ?? 0);
+    i === 0 ? ctx.moveTo(x, y) : ctx.lineTo(x, y);
+  });
+  ctx.stroke();
+
+  if (CE.points.length) {
+    ctx.strokeStyle = '#fff'; ctx.lineWidth = 1.2; ctx.setLineDash([5,4]);
+    ctx.beginPath();
+    CE.points.forEach((p, i) => {
+      const x = ((ts[p.frame] ?? 0) / dur) * waveW, y = yFor(p.value);
+      i === 0 ? ctx.moveTo(x, y) : ctx.lineTo(x, y);
+    });
+    ctx.stroke(); ctx.setLineDash([]);
+    CE.points.forEach(p => {
+      const x = ((ts[p.frame] ?? 0) / dur) * waveW, y = yFor(p.value);
+      ctx.fillStyle = CE.tool === 'scissors' ? '#e63946' : '#fff';
+      ctx.beginPath(); ctx.arc(x, y, 5, 0, Math.PI*2); ctx.fill();
+    });
+  }
+
+  const frameIdx = Math.min(Math.max(0, Math.round(WF.cursor || 0)), CE.full.total_frames - 1);
+  const px = ((ts[frameIdx] ?? 0) / dur) * waveW;
+  ctx.strokeStyle = '#e63946'; ctx.lineWidth = 2;
+  ctx.beginPath(); ctx.moveTo(px, 0); ctx.lineTo(px, cssH); ctx.stroke();
+  const v = vals[frameIdx] ?? 0;
+  ctx.fillStyle = '#e63946'; ctx.font = '11px monospace'; ctx.textAlign = 'left';
+  ctx.fillText((v >= 0 ? '+' : '') + v.toFixed(3), waveW + 6, top + 14);
+}
+
+(function() {
+  const canvas = document.getElementById('ce-canvas');
+  canvas.addEventListener('mousedown', e => {
+    if (!CE.full || !CE.full.total_frames) return;
+    const {cssW, cssH} = ceCanvasSize();
+    const x = e.offsetX, y = e.offsetY;
+    if (x > cssW - CE.VAL_W) return;
+    if (CE.tool === 'draw') {
+      if (_locked[CE.key]) return;
+      CE._drawing = true; CE._drawEdits = []; ceDrawAtPoint(x, y, cssW, cssH);
+      return;
+    }
+    if (CE.tool === 'point') {
+      if (_locked[CE.key]) return;
+      const {frame, value} = ceFrameValueAt(x, y, cssW, cssH);
+      const existingIdx = CE.points.findIndex(p => p.frame === frame);
+      if (existingIdx >= 0) CE.points[existingIdx].value = value;
+      else CE.points.push({frame, value});
+      CE.points.sort((a,b) => a.frame - b.frame);
+      ceUpdatePointButtons();
+      ceDraw();
+      return;
+    }
+    if (CE.tool === 'scissors') {
+      const waveW = Math.max(cssW - CE.VAL_W, 1);
+      const dur = CE.full.duration || 1;
+      const top = CE.RULER_H, areaH = cssH - top;
+      let lo = Math.min(...CE.full.values), hi = Math.max(...CE.full.values);
+      if (hi - lo < 1e-4) { lo -= 0.5; hi += 0.5; }
+      const yForPt = v => top + areaH - CE.PAD - ((v-lo)/(hi-lo)) * (areaH - 2*CE.PAD);
+      let nearest = -1, nearestDist = 12; // px radius
+      CE.points.forEach((p, i) => {
+        const px = ((CE.full.timestamps[p.frame] ?? 0) / dur) * waveW;
+        const py = yForPt(p.value);
+        const d = Math.hypot(px - x, py - y);
+        if (d < nearestDist) { nearest = i; nearestDist = d; }
+      });
+      if (nearest >= 0) { CE.points.splice(nearest, 1); ceUpdatePointButtons(); ceDraw(); }
+      return;
+    }
+  });
+  canvas.addEventListener('mousemove', e => {
+    if (CE._drawing) {
+      const {cssW, cssH} = ceCanvasSize();
+      ceDrawAtPoint(e.offsetX, e.offsetY, cssW, cssH);
+    }
+  });
+  canvas.addEventListener('mouseup',    ceCommitDraw);
+  canvas.addEventListener('mouseleave', ceCommitDraw);
+  window.addEventListener('resize', () => ceDraw());
+})();
+
 (function() {
   const canvas = document.getElementById('wf-canvas');
   canvas.addEventListener('mousedown', e => {
@@ -931,7 +1254,12 @@ function toggleChannelLock(key) {
     if (WF.editMode && x >= WF.LOCK_W + WF.LABEL_W) {
       WF._drawing = true; WF._drawEdits = []; WF._drawAtPoint(x, y); return;
     }
-    if (x < WF.LOCK_W + WF.LABEL_W) return;
+    if (x < WF.LOCK_W + WF.LABEL_W) {
+      const rowIdx = Math.floor((y - WF.RULER_H) / WF.ROW_H);
+      const vis = WF.visible();
+      if (rowIdx >= 0 && rowIdx < vis.length) openChannelEditor(vis[rowIdx].key);
+      return;
+    }
     WF.dragging = true; WF.seek(x);
   });
   canvas.addEventListener('mousemove', e => {
@@ -972,13 +1300,15 @@ function onScrub(val) {
   fetch(API + '/api/playback/seek', {
     method:'POST', headers:{'Content-Type':'application/json'},
     body: JSON.stringify({frame})
-  }).then(() => { WF.cursor = frame; WF.draw(); });
+  }).then(() => { WF.cursor = frame; WF.draw(); ceDraw(); });
 }
 
 function updateScrubSlider(frame) {
   _scrubBusy = true;
   const sl = document.getElementById('scrub-slider');
   if (sl) sl.value = frame;
+  const ceSl = document.getElementById('ce-scrub-slider');
+  if (ceSl) ceSl.value = frame;
   _scrubBusy = false;
   if (WF.data && WF.data.timestamps) {
     const n    = WF.data.timestamps.length;
@@ -1291,6 +1621,8 @@ function updateSessionInfo(name, frames, dur) {
   }
   const sl = document.getElementById('scrub-slider');
   if (sl) { sl.max = Math.max(1, frames-1); sl.value = 0; sl.disabled = false; }
+  const ceSl = document.getElementById('ce-scrub-slider');
+  if (ceSl) { ceSl.max = Math.max(1, frames-1); ceSl.value = 0; }
   const durEl = document.getElementById('scrub-dur');
   if (durEl) durEl.textContent = typeof dur === 'number' ? dur.toFixed(1)+'s' : dur;
 }
@@ -1555,6 +1887,8 @@ function pollStatus() {
       if (durEl) durEl.textContent = s.duration_str;
       const sl = document.getElementById('scrub-slider');
       if (sl && !sl.disabled) sl.max = Math.max(1, s.frame_count-1);
+      const ceSl = document.getElementById('ce-scrub-slider');
+      if (ceSl) ceSl.max = Math.max(1, s.frame_count-1);
       const scrubDur = document.getElementById('scrub-dur');
       if (scrubDur) scrubDur.textContent = s.duration_str;
     }
