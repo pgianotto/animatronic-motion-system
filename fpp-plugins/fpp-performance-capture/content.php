@@ -582,6 +582,7 @@ $step_time_ms = intval($cfg['step_time_ms'] ?? 50);
       <span style="color:#2a2a4a; margin:0 2px;">|</span>
       <button class="pc-btn btn-play btn-sm" id="ce-btn-apply" onclick="ceApplyPoints()" disabled>Apply Points</button>
       <button class="pc-btn btn-ghost btn-sm" id="ce-btn-cancel" onclick="ceCancelPoints()" disabled>Cancel</button>
+      <button class="pc-btn btn-ghost btn-sm ce-tool-btn active" id="ce-btn-show-points" onclick="ceToggleShowPoints()" title="Show or hide the staged point markers">👁 Show Points</button>
       <span style="color:#2a2a4a; margin:0 2px;">|</span>
       <span style="color:var(--muted); font-size:11px;">Smooth window</span>
       <input type="number" class="pc-input" id="ce-smooth-window" value="5" min="2" max="60" style="width:55px;">
@@ -970,13 +971,15 @@ function toggleChannelLock(key) {
 const CE = {
   key: null, full: null, tool: 'draw',
   points: [],                       // staged {frame, value} keyframes for the Add Point tool
+  showPoints: true,                 // whether staged point markers are drawn
   RULER_H: 22, VAL_W: 60, PAD: 8,
   _drawing: false, _drawEdits: [], _drawSnapshot: null,
 };
 
 function openChannelEditor(key) {
-  CE.key = key; CE.tool = 'draw'; CE.points = [];
+  CE.key = key; CE.tool = 'draw'; CE.points = []; CE.showPoints = true;
   CE._drawing = false; CE._drawEdits = []; CE._drawSnapshot = null;
+  document.getElementById('ce-btn-show-points').classList.add('active');
   const j = JOINTS.find(j => j.key === key);
   CE.color = j ? (j.group === 'face' ? WF.FACE_COL : WF.BODY_COL) : '#4cc9f0';
   document.getElementById('ce-title').textContent = j ? j.label : key;
@@ -1017,6 +1020,12 @@ function ceSetTool(tool) {
 function ceUpdatePointButtons() {
   document.getElementById('ce-btn-apply').disabled  = CE.points.length < 2;
   document.getElementById('ce-btn-cancel').disabled = CE.points.length === 0;
+}
+
+function ceToggleShowPoints() {
+  CE.showPoints = !CE.showPoints;
+  document.getElementById('ce-btn-show-points').classList.toggle('active', CE.showPoints);
+  ceDraw();
 }
 
 function ceApplyPoints() {
@@ -1165,7 +1174,7 @@ function ceDraw() {
   });
   ctx.stroke();
 
-  if (CE.points.length) {
+  if (CE.points.length && CE.showPoints) {
     ctx.strokeStyle = '#fff'; ctx.lineWidth = 1.2; ctx.setLineDash([5,4]);
     ctx.beginPath();
     CE.points.forEach((p, i) => {
