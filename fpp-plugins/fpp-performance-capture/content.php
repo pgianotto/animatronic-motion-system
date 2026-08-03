@@ -109,6 +109,10 @@ $step_time_ms = intval($cfg['step_time_ms'] ?? 50);
 .jm-table th { color:var(--muted); text-align:left; padding:5px 8px;
                border-bottom:1px solid #2a2a4a; font-weight:normal; font-size:11px; }
 .jm-table td { padding:4px 8px; border-bottom:1px solid var(--dark); vertical-align:middle; }
+.jm-table.jm-simple .jm-col-adv { display:none; }
+.jm-grp-hdr { cursor:pointer; user-select:none; }
+.jm-grp-hdr .jm-grp-arrow { display:inline-block; width:10px; }
+.jm-table tr.jm-row-collapsed { display:none; }
 .jm-bar-bg { flex:1; height:6px; background:var(--dark); border-radius:3px; overflow:hidden; min-width:50px; max-width:90px; }
 .jm-bar    { height:100%; background:var(--cyan); border-radius:3px; transition:width .1s; }
 .jm-val    { color:var(--cyan); font-family:monospace; font-size:10px; width:38px; text-align:right; flex-shrink:0; }
@@ -122,25 +126,19 @@ $step_time_ms = intval($cfg['step_time_ms'] ?? 50);
 .pc-msg  { font-size:11px; min-height:16px; }
 .pc-hint { color:#555; font-size:11px; line-height:1.5; margin:0 0 8px; }
 
-/* ── Process steps bar ─────────────────────────────────────────────────────── */
-.pc-steps { display:flex; align-items:center; gap:0; margin-bottom:16px;
-            background:var(--panel); border-radius:8px; padding:10px 16px; }
-.pc-step  { display:flex; align-items:center; gap:7px; color:#333;
-            font-size:10px; font-weight:bold; letter-spacing:1.2px; text-transform:uppercase; }
-.pc-step .sn { width:18px; height:18px; border-radius:50%; border:1px solid #333;
-               display:flex; align-items:center; justify-content:center; font-size:9px; flex-shrink:0; }
-.pc-step .sa { color:#2a2a4a; font-size:14px; margin:0 10px; }
-.pc-step.active     { color:var(--cyan); }
-.pc-step.active .sn { border-color:var(--cyan); background:var(--cyan); color:#000; }
-.pc-step.done       { color:#2a4a3a; }
-.pc-step.done .sn   { border-color:#2a4a3a; background:#2a4a3a; color:#06d6a0; }
-
+/* ── Tabs (also act as the step/progress indicator) ────────────────────────── */
 .pc-tabs  { display:flex; gap:0; margin-bottom:16px; border-bottom:2px solid var(--div); }
-.pc-tab   { padding:9px 22px; cursor:pointer; font-size:12px; font-weight:bold;
+.pc-tab   { display:flex; align-items:center; gap:8px; padding:9px 22px; cursor:pointer; font-size:12px; font-weight:bold;
             letter-spacing:0.8px; text-transform:uppercase; color:var(--muted);
             border-bottom:2px solid transparent; margin-bottom:-2px; }
 .pc-tab:hover  { color:var(--fg); }
 .pc-tab.active { color:var(--cyan); border-bottom-color:var(--cyan); }
+.pc-tab .sn { width:18px; height:18px; border-radius:50%; border:1px solid #444;
+              display:flex; align-items:center; justify-content:center; font-size:9px; flex-shrink:0;
+              color:#666; }
+.pc-tab.active .sn { border-color:var(--cyan); background:var(--cyan); color:#000; }
+.pc-tab.done .sn   { border-color:#2a4a3a; background:#2a4a3a; color:#06d6a0; }
+.pc-tab.done.active .sn { border-color:var(--cyan); background:var(--cyan); color:#000; }
 .pc-tabpanel   { display:none; }
 .pc-tabpanel.active { display:block; }
 
@@ -163,22 +161,11 @@ $step_time_ms = intval($cfg['step_time_ms'] ?? 50);
 
 <div class="pc-wrap">
 
-<!-- ══ Process bar (always visible above tabs) ══════════════════════════════ -->
-<div class="pc-steps" id="pc-steps">
-  <div class="pc-step active" id="step-1"><span class="sn">1</span>Map &amp; Test</div>
-  <span class="sa">›</span>
-  <div class="pc-step" id="step-2"><span class="sn">2</span>Record</div>
-  <span class="sa">›</span>
-  <div class="pc-step" id="step-3"><span class="sn">3</span>Review</div>
-  <span class="sa">›</span>
-  <div class="pc-step" id="step-4"><span class="sn">4</span>Export</div>
-</div>
-
-<!-- ══ Tabs ══════════════════════════════════════════════════════════════════ -->
+<!-- ══ Tabs (also the step/progress indicator) ══════════════════════════════ -->
 <div class="pc-tabs">
-  <div class="pc-tab active" data-tab="map-test" onclick="switchTab('map-test')">1 · Map &amp; Test</div>
-  <div class="pc-tab"        data-tab="record"   onclick="switchTab('record')">2 · Record</div>
-  <div class="pc-tab"        data-tab="review"   onclick="switchTab('review')">3 · Review &amp; Export</div>
+  <div class="pc-tab active" id="tab-btn-map-test" data-tab="map-test" onclick="switchTab('map-test')"><span class="sn">1</span>Map &amp; Test</div>
+  <div class="pc-tab"        id="tab-btn-record"   data-tab="record"   onclick="switchTab('record')"><span class="sn">2</span>Record</div>
+  <div class="pc-tab"        id="tab-btn-review"   data-tab="review"   onclick="switchTab('review')"><span class="sn">3</span>Review &amp; Export</div>
 </div>
 
 <!-- ══════════════════════════════════════════════════════════════════════════
@@ -202,27 +189,27 @@ $step_time_ms = intval($cfg['step_time_ms'] ?? 50);
 
     <!-- Live Output toggle + values -->
     <div style="flex:1; min-width:0;">
-      <h3>Live Output</h3>
+      <h3>Test Servos Live</h3>
       <div class="live-toggle-card">
         <div class="live-desc">
           <p>
-            Drives the mapped servos in real-time from the camera feed.
-            Enable here, then move in front of the camera — the preview shows
-            tracking and the joints table below confirms each value responds.
-            Turn off before recording to avoid servo noise in the timeline.
+            Moves your mapped servos live so you can check the mapping.
+            Turn this off before recording — it's for testing only.
           </p>
         </div>
         <button id="btn-live"
                 class="pc-btn btn-live-main <?= ($cfg['live_output'] ?? false) ? 'btn-live-on' : 'btn-live-off' ?>"
                 onclick="toggleLive()">
-          <?= ($cfg['live_output'] ?? false) ? '⏹ Live ON' : '⏵ Enable Live Output' ?>
+          <?= ($cfg['live_output'] ?? false) ? '⏹ Stop Live Test' : '▶ Start Live Test' ?>
         </button>
       </div>
 
-  <!-- Live values visible here so user can confirm tracking while tuning -->
-  <div style="margin-top:14px; padding-top:12px; border-top:1px solid var(--div);">
-    <div class="rp-hdr" style="margin-bottom:6px;">Live Tracking Values</div>
-    <div class="tv-grid">
+  <!-- Live values collapsed by default — the joint table's Live Value column already
+       shows the ones that matter while mapping; this is for deeper debugging. -->
+  <details style="margin-top:14px; padding-top:12px; border-top:1px solid var(--div);">
+    <summary style="cursor:pointer; color:var(--muted); font-size:10px; font-weight:bold;
+                     letter-spacing:1.5px; text-transform:uppercase;">Show raw tracking values</summary>
+    <div class="tv-grid" style="margin-top:8px;">
       <div>
         <div class="tv-grp" style="color:var(--cyan);">FACE</div>
         <?php foreach (['head_yaw','head_pitch','head_roll','mouth_open',
@@ -247,7 +234,7 @@ $step_time_ms = intval($cfg['step_time_ms'] ?? 50);
         <?php endforeach; ?>
       </div>
     </div>
-  </div>
+  </details>
     </div><!-- /right col -->
   </div><!-- /outer flex row -->
 </div><!-- /live output card -->
@@ -257,6 +244,7 @@ $step_time_ms = intval($cfg['step_time_ms'] ?? 50);
   <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:6px;">
     <h3 style="margin:0;">Joint → Servo Mapping</h3>
     <div style="display:flex; gap:8px; align-items:center;">
+      <button class="pc-btn btn-ghost btn-sm" id="btn-jm-advanced" onclick="toggleJmAdvanced()">⚙ Show advanced</button>
       <button class="pc-btn btn-ghost btn-sm" onclick="testServoOutput()" title="Send center values to all configured servo ports">▶ Test Servos</button>
       <span id="jm-test-msg" class="pc-msg" style="margin:0;"></span>
       <button class="pc-btn btn-ghost btn-sm" onclick="saveJointMap()">Save Mapping</button>
@@ -266,12 +254,13 @@ $step_time_ms = intval($cfg['step_time_ms'] ?? 50);
     Assign each tracked joint to a servo port.
     Min / max / center calibration is read from the Servo Calibrator plugin.
   </p>
-  <table class="jm-table">
+  <table class="jm-table jm-simple" id="jm-table">
     <thead>
       <tr>
         <th>Joint</th><th>Live Value</th><th>Port</th>
-        <th style="text-align:center;">Invert</th><th>Scale %</th>
-        <th>xLights Model</th>
+        <th class="jm-col-adv" style="text-align:center;">Invert</th>
+        <th class="jm-col-adv" title="How far the servo swings relative to your motion">Scale %</th>
+        <th class="jm-col-adv">xLights Model</th>
       </tr>
     </thead>
     <tbody id="jm-tbody">
@@ -285,39 +274,41 @@ $step_time_ms = intval($cfg['step_time_ms'] ?? 50);
 
 <!-- Smoothing Settings ──────────────────────────────────────────────────── -->
 <div class="pc-card">
-  <h3>Smoothing</h3>
-  <div style="display:grid; grid-template-columns:1fr 1fr; gap:12px 32px; max-width:600px;">
-    <div>
-      <div style="color:var(--muted); font-size:11px; margin-bottom:4px;">
-        Joint Smoothing
-        <span style="color:#444; font-size:10px; margin-left:4px;">lower = smoother / slower</span>
+  <details>
+    <summary style="cursor:pointer;"><h3 style="display:inline; margin:0;">Smoothing (advanced)</h3></summary>
+    <div style="display:grid; grid-template-columns:1fr 1fr; gap:12px 32px; max-width:600px; margin-top:12px;">
+      <div>
+        <div style="color:var(--muted); font-size:11px; margin-bottom:4px;">
+          Tracking Smoothness
+          <span style="color:#444; font-size:10px; margin-left:4px;">higher = calmer motion, but slower to follow you</span>
+        </div>
+        <div style="display:flex; align-items:center; gap:8px;">
+          <input type="range" id="sl-smoothing" style="flex:1; accent-color:var(--cyan);"
+                 min="0.05" max="0.9" step="0.05"
+                 value="<?= number_format($cfg['smoothing'] ?? 0.15, 2) ?>"
+                 oninput="document.getElementById('lbl-smoothing').textContent=parseFloat(this.value).toFixed(2)">
+          <span id="lbl-smoothing" class="pc-value" style="width:30px; font-size:12px;"><?= number_format($cfg['smoothing'] ?? 0.15, 2) ?></span>
+        </div>
       </div>
-      <div style="display:flex; align-items:center; gap:8px;">
-        <input type="range" id="sl-smoothing" style="flex:1; accent-color:var(--cyan);"
-               min="0.05" max="0.9" step="0.05"
-               value="<?= number_format($cfg['smoothing'] ?? 0.15, 2) ?>"
-               oninput="document.getElementById('lbl-smoothing').textContent=parseFloat(this.value).toFixed(2)">
-        <span id="lbl-smoothing" class="pc-value" style="width:30px; font-size:12px;"><?= number_format($cfg['smoothing'] ?? 0.15, 2) ?></span>
+      <div>
+        <div style="color:var(--muted); font-size:11px; margin-bottom:4px;">
+          Servo Motion Damping
+          <span style="color:#444; font-size:10px; margin-left:4px;">higher = gentler servo movement, less mechanical jitter</span>
+        </div>
+        <div style="display:flex; align-items:center; gap:8px;">
+          <input type="range" id="sl-servo" style="flex:1; accent-color:var(--cyan);"
+                 min="0.05" max="0.9" step="0.05"
+                 value="<?= number_format($cfg['servo_smoothing'] ?? 0.25, 2) ?>"
+                 oninput="document.getElementById('lbl-servo').textContent=parseFloat(this.value).toFixed(2)">
+          <span id="lbl-servo" class="pc-value" style="width:30px; font-size:12px;"><?= number_format($cfg['servo_smoothing'] ?? 0.25, 2) ?></span>
+        </div>
       </div>
     </div>
-    <div>
-      <div style="color:var(--muted); font-size:11px; margin-bottom:4px;">
-        Servo Smoothing
-        <span style="color:#444; font-size:10px; margin-left:4px;">output µs damping</span>
-      </div>
-      <div style="display:flex; align-items:center; gap:8px;">
-        <input type="range" id="sl-servo" style="flex:1; accent-color:var(--cyan);"
-               min="0.05" max="0.9" step="0.05"
-               value="<?= number_format($cfg['servo_smoothing'] ?? 0.25, 2) ?>"
-               oninput="document.getElementById('lbl-servo').textContent=parseFloat(this.value).toFixed(2)">
-        <span id="lbl-servo" class="pc-value" style="width:30px; font-size:12px;"><?= number_format($cfg['servo_smoothing'] ?? 0.25, 2) ?></span>
-      </div>
+    <div style="margin-top:10px; display:flex; align-items:center; gap:10px;">
+      <button class="pc-btn btn-ghost btn-sm" onclick="saveSmoothing()">Save Settings</button>
+      <span id="settings-msg" class="pc-msg" style="margin:0;"></span>
     </div>
-  </div>
-  <div style="margin-top:10px; display:flex; align-items:center; gap:10px;">
-    <button class="pc-btn btn-ghost btn-sm" onclick="saveSmoothing()">Save Settings</button>
-    <span id="settings-msg" class="pc-msg" style="margin:0;"></span>
-  </div>
+  </details>
 </div>
 
 </div><!-- /tab-map-test -->
@@ -329,17 +320,14 @@ $step_time_ms = intval($cfg['step_time_ms'] ?? 50);
      ══════════════════════════════════════════════════════════════════════ -->
 <div class="pc-tabpanel" id="tab-record">
 
-<!-- Camera unavailable warning ─────────────────────────────────────────── -->
-<div class="pc-card" id="cam-ownership-card" style="<?= $cam_running ? 'display:none' : '' ?>">
-  <h3>Camera Unavailable</h3>
-  <p class="pc-hint" style="margin-bottom:10px;">
-    The camera is held by the Live Follow plugin.
-    Click <strong>Claim Camera</strong> to release it and start the capture feed.
-  </p>
+<!-- Post-record contextual save bar — shown right after a recording stops ── -->
+<div class="pc-card" id="post-rec-save" style="display:none; border:1px solid var(--green);">
   <div style="display:flex; gap:8px; align-items:center; flex-wrap:wrap;">
-    <button class="pc-btn btn-play" onclick="claimCamera()">▶ Claim Camera</button>
-    <button class="pc-btn btn-ghost" onclick="restoreLiveFollow()">↩ Restore Live Follow</button>
-    <span id="cam-claim-msg" class="pc-msg" style="margin:0;"></span>
+    <span style="color:var(--green); font-size:12px;">✓ Recording captured</span>
+    <span id="post-rec-info" style="color:var(--muted); font-size:12px; font-family:monospace;"></span>
+    <input class="pc-input" id="sess-save-name-inline" style="flex:1; min-width:120px; font-size:11px;">
+    <button class="pc-btn btn-play btn-sm" onclick="sessSaveAndReview()">Save &amp; Review</button>
+    <button class="pc-btn btn-ghost btn-sm" onclick="skipPostRecordSave()">Skip, just review</button>
   </div>
 </div>
 
@@ -351,10 +339,11 @@ $step_time_ms = intval($cfg['step_time_ms'] ?? 50);
     <div class="cam-container">
       <img id="rec-stream" class="pc-stream"
            onerror="this.style.display='none'" alt="">
-      <div style="position:absolute; top:10px; left:10px;">
+      <div style="position:absolute; top:10px; left:10px; display:flex; gap:6px;">
         <span class="pc-badge <?= $recording ? 'badge-rec' : 'badge-idle' ?>" id="badge-rec">
           <?= $recording ? '● REC' : 'IDLE' ?>
         </span>
+        <span class="pc-badge badge-idle" id="cam-status-badge" style="display:none;"></span>
       </div>
       <div class="cam-controls">
         <span id="rec-info" style="font-size:11px; color:#ccc; margin-right:auto; font-family:monospace;">
@@ -364,13 +353,21 @@ $step_time_ms = intval($cfg['step_time_ms'] ?? 50);
         <button class="pc-btn btn-stop" id="btn-srec" onclick="recStop()"  <?= $recording ? '' : 'style="display:none"' ?>>■ Stop</button>
       </div>
     </div>
+    <!-- Manual fallback — only shown after automatic reconnect attempts are exhausted -->
+    <div id="cam-recovery-bar" style="display:none; padding:8px 10px; background:var(--dark);
+         border-top:1px solid #2a2a4a; gap:8px; align-items:center; flex-wrap:wrap;">
+      <span style="color:var(--amber); font-size:11px;">Camera still busy (held by Live Follow)</span>
+      <button class="pc-btn btn-play  btn-sm" onclick="claimCamera()">Try Again</button>
+      <button class="pc-btn btn-ghost btn-sm" onclick="restoreLiveFollow()">Use Live Follow Instead</button>
+      <span id="cam-claim-msg" class="pc-msg" style="margin:0;"></span>
+    </div>
   </div>
 
   <!-- Session & Audio panel -->
   <div class="pc-card" style="width:290px; flex-shrink:0;">
 
     <div class="rp-section" style="padding-top:0;">
-      <div class="rp-hdr">Load Session</div>
+      <div class="rp-hdr">Open Saved Recording</div>
       <div style="display:flex; gap:4px; align-items:center; flex-wrap:wrap;">
         <select class="pc-select" id="sess-load-sel" style="flex:1; min-width:0; font-size:11px;">
           <?php foreach ($sessions as $s): ?>
@@ -403,18 +400,6 @@ $step_time_ms = intval($cfg['step_time_ms'] ?? 50);
         <button class="pc-btn btn-muted btn-sm" onclick="loadAudioDevices()" title="Refresh">↻</button>
       </div>
       <span id="audio-msg" class="pc-msg" style="display:block; margin-top:3px;"></span>
-    </div>
-
-    <div class="rp-section">
-      <div class="rp-hdr">
-        Save Recording
-        <span style="color:#444; font-size:9px; font-weight:normal; letter-spacing:0; text-transform:none; margin-left:4px;">(optional)</span>
-      </div>
-      <div style="display:flex; gap:4px; align-items:center;">
-        <input class="pc-input" id="sess-save-name" value="" placeholder="record first, then name it"
-               style="flex:1; min-width:0; font-size:11px;">
-        <button class="pc-btn btn-ghost btn-sm" onclick="sessSave()">Save</button>
-      </div>
     </div>
 
     <span id="status-msg" class="pc-msg" style="display:block; margin-top:8px; padding-top:4px;"></span>
@@ -460,8 +445,8 @@ $step_time_ms = intval($cfg['step_time_ms'] ?? 50);
     <h3 style="margin:0;">Review</h3>
     <div class="wf-filter">
       <label><input type="radio" name="wf-filter" value="all" checked onchange="wfSetFilter('all')"> All</label>
-      <label><input type="radio" name="wf-filter" value="servo" onchange="wfSetFilter('servo')"> Servo-mapped</label>
-      <label><input type="radio" name="wf-filter" value="select" onchange="wfSetFilter('select')"> Custom</label>
+      <label><input type="radio" name="wf-filter" value="servo" onchange="wfSetFilter('servo')"> Mapped Joints Only</label>
+      <label><input type="radio" name="wf-filter" value="select" onchange="wfSetFilter('select')"> Choose Channels…</label>
     </div>
   </div>
 
@@ -535,7 +520,7 @@ $step_time_ms = intval($cfg['step_time_ms'] ?? 50);
     </p>
     <div class="pc-field">
       <span class="pc-label">Filename</span>
-      <input class="pc-input" id="fseq-name" value="capture" style="width:180px;" placeholder="no extension">
+      <input class="pc-input" id="fseq-name" value="capture" style="width:180px;" placeholder="no extension" oninput="this.dataset.dirty='1'">
       <button class="pc-btn btn-export" onclick="exportFseq()">Export FSEQ for FPP</button>
     </div>
     <div id="fseq-msg" class="pc-msg"></div>
@@ -556,7 +541,7 @@ $step_time_ms = intval($cfg['step_time_ms'] ?? 50);
     </p>
     <div class="pc-field">
       <span class="pc-label">Filename</span>
-      <input class="pc-input" id="xsq-name" value="capture" style="width:180px;" placeholder="no extension">
+      <input class="pc-input" id="xsq-name" value="capture" style="width:180px;" placeholder="no extension" oninput="this.dataset.dirty='1'">
       <button class="pc-btn btn-ghost" onclick="exportXlights()">Export XSQ for xLights</button>
     </div>
     <div id="xsq-msg" class="pc-msg"></div>
@@ -611,14 +596,28 @@ function switchTab(name) {
   if (recImg) recImg.src = (name === 'record')   ? STREAM_URL : '';
 }
 
-// ── Process step highlight ────────────────────────────────────────────────────
-function setStep(n) {
-  [1,2,3,4].forEach(i => {
-    const el = document.getElementById('step-'+i);
-    if (!el) return;
-    el.className = 'pc-step' + (i === n ? ' active' : i < n ? ' done' : '');
-  });
-  if (n === 3 || n === 4) switchTab('review');
+// ── Stepper (done-state on the tabs themselves) ───────────────────────────────
+let _exportedThisSession = sessionStorage.getItem('pc-exported') === '1';
+
+function markExported() {
+  _exportedThisSession = true;
+  sessionStorage.setItem('pc-exported', '1');
+  updateStepper(_lastStatus || {});
+}
+
+let _lastStatus = null;
+function updateStepper(s) {
+  _lastStatus = s;
+  const mapDone    = (s.joint_map_count || 0) > 0;
+  const recordDone = (s.frame_count || 0) > 0;
+  const exportDone = _exportedThisSession;
+  const set = (id, done) => {
+    const el = document.getElementById(id);
+    if (el) el.classList.toggle('done', done);
+  };
+  set('tab-btn-map-test', mapDone);
+  set('tab-btn-record',   recordDone);
+  set('tab-btn-review',   exportDone);
 }
 
 // ── Waveform ──────────────────────────────────────────────────────────────────
@@ -1026,28 +1025,58 @@ function buildJointTable(ports, jointMap) {
     if (j.group !== lastGroup) {
       lastGroup = j.group;
       const color = j.group === 'face' ? '#4cc9f0' : '#fb8500';
-      rows.push(`<tr><td colspan="6" style="padding:8px 8px 2px; color:${color};
-        font-size:10px; font-weight:bold; letter-spacing:1px;">${j.group === 'face' ? 'Face' : 'Body'}</td></tr>`);
+      const label = j.group === 'face' ? 'Face' : 'Body';
+      const collapsed = localStorage.getItem('pc-jm-group-' + j.group) === 'closed';
+      rows.push(`<tr class="jm-grp-hdr" data-group-hdr="${j.group}" onclick="toggleJmGroup('${j.group}')">
+        <td colspan="6" style="padding:8px 8px 2px; color:${color};
+        font-size:10px; font-weight:bold; letter-spacing:1px;">
+        <span class="jm-grp-arrow">${collapsed ? '▸' : '▾'}</span>${label}</td></tr>`);
     }
     const m   = jointMap[j.key] || {};
     const sel = m.port !== undefined ? m.port : -1;
     const sc  = m.scale !== undefined ? Math.round(m.scale * 100) : 100;
     const mdl = m.xlights_model || '';
     const opts = portOpts.replace(`value="${sel}"`, `value="${sel}" selected`);
-    rows.push(`<tr>
+    const collapsedRow = localStorage.getItem('pc-jm-group-' + j.group) === 'closed';
+    rows.push(`<tr data-group="${j.group}" class="${collapsedRow ? 'jm-row-collapsed' : ''}">
       <td style="color:${j.group==='face'?'#4cc9f0':'#fb8500'}; font-size:11px;">${j.label}</td>
       <td><div style="display:flex; align-items:center; gap:6px;">
         <div class="jm-bar-bg"><div class="jm-bar" id="jm-bar-${j.key}"></div></div>
         <span class="jm-val" id="jm-val-${j.key}">—</span>
       </div></td>
       <td><select class="jm-sel" id="jm-port-${j.key}">${opts}</select></td>
-      <td style="text-align:center;"><input type="checkbox" id="jm-inv-${j.key}" ${m.invert?'checked':''}></td>
-      <td><input type="number" class="jm-scale-in" id="jm-scale-${j.key}" value="${sc}" min="0" max="200" step="5"></td>
-      <td><input type="text" class="jm-model-in" id="jm-model-${j.key}" value="${mdl}" placeholder="e.g. Mickey.Arm"></td>
+      <td class="jm-col-adv" style="text-align:center;"><input type="checkbox" id="jm-inv-${j.key}" ${m.invert?'checked':''}></td>
+      <td class="jm-col-adv"><input type="number" class="jm-scale-in" id="jm-scale-${j.key}" value="${sc}" min="0" max="200" step="5"></td>
+      <td class="jm-col-adv"><input type="text" class="jm-model-in" id="jm-model-${j.key}" value="${mdl}" placeholder="e.g. Mickey.Arm"></td>
     </tr>`);
   }
   tbody.innerHTML = rows.join('');
 }
+
+function toggleJmGroup(group) {
+  const closed = localStorage.getItem('pc-jm-group-' + group) === 'closed';
+  localStorage.setItem('pc-jm-group-' + group, closed ? 'open' : 'closed');
+  document.querySelectorAll(`tr[data-group="${group}"]`).forEach(tr => tr.classList.toggle('jm-row-collapsed', !closed));
+  const arrow = document.querySelector(`tr[data-group-hdr="${group}"] .jm-grp-arrow`);
+  if (arrow) arrow.textContent = closed ? '▾' : '▸';
+}
+
+function toggleJmAdvanced() {
+  const table = document.getElementById('jm-table');
+  const btn   = document.getElementById('btn-jm-advanced');
+  const showing = table.classList.contains('jm-simple');
+  table.classList.toggle('jm-simple', !showing);
+  if (btn) btn.textContent = showing ? '⚙ Hide advanced' : '⚙ Show advanced';
+  localStorage.setItem('pc-jm-advanced', showing ? '1' : '0');
+}
+
+(function initJmAdvanced() {
+  const on    = localStorage.getItem('pc-jm-advanced') === '1';
+  const table = document.getElementById('jm-table');
+  const btn   = document.getElementById('btn-jm-advanced');
+  if (table) table.classList.toggle('jm-simple', !on);
+  if (btn) btn.textContent = on ? '⚙ Hide advanced' : '⚙ Show advanced';
+})();
 
 function updateJointBars(values) {
   JOINTS.forEach(j => {
@@ -1099,7 +1128,7 @@ function toggleLive() {
 function setLiveBtn(on) {
   const btn = document.getElementById('btn-live');
   if (!btn) return;
-  btn.textContent = on ? '⏹ Live ON' : '⏵ Enable Live Output';
+  btn.textContent = on ? '⏹ Stop Live Test' : '▶ Start Live Test';
   btn.className   = 'pc-btn btn-live-main ' + (on ? 'btn-live-on' : 'btn-live-off');
 }
 
@@ -1163,6 +1192,7 @@ function _updateTlButtons() {
 
 // ── Recording ─────────────────────────────────────────────────────────────────
 function recStart() {
+  hidePostRecordBar();
   fetch(API+'/api/record/start', {method:'POST'}).then(pollStatus);
   _syncAudio('play', 0);
 }
@@ -1171,23 +1201,62 @@ function recStop() {
   fetch(API+'/api/record/stop', {method:'POST'}).then(() => {
     pollStatus();
     WF.load();
-    setStep(3);
-    const d = new Date(), pad = n => String(n).padStart(2,'0');
-    const name = `capture-${d.getFullYear()}${pad(d.getMonth()+1)}${pad(d.getDate())}-${pad(d.getHours())}${pad(d.getMinutes())}.json`;
-    const el = document.getElementById('sess-save-name');
-    if (el && !el.value.trim()) el.value = name;
+    switchTab('review');
+    const base = defaultSessionBaseName();
+    syncExportNames(base);
+    showPostRecordBar(base);
   });
 }
 
+function defaultSessionBaseName() {
+  const d = new Date(), pad = n => String(n).padStart(2,'0');
+  return `capture-${d.getFullYear()}${pad(d.getMonth()+1)}${pad(d.getDate())}-${pad(d.getHours())}${pad(d.getMinutes())}`;
+}
+
+// Keeps the export filename fields defaulted to the current session's name,
+// unless the user has hand-edited one (tracked via data-dirty).
+function syncExportNames(base) {
+  ['fseq-name', 'xsq-name'].forEach(id => {
+    const el = document.getElementById(id);
+    if (el && el.dataset.dirty !== '1') el.value = base;
+  });
+}
+
+// ── Post-record contextual save bar ───────────────────────────────────────────
+function showPostRecordBar(base) {
+  const bar = document.getElementById('post-rec-save');
+  if (!bar) return;
+  const info = document.getElementById('post-rec-info');
+  if (info && _lastStatus) info.textContent = `${_lastStatus.duration_str||''} · ${_lastStatus.frame_count||0} frames`;
+  const nameEl = document.getElementById('sess-save-name-inline');
+  if (nameEl) nameEl.value = base + '.json';
+  bar.style.display = '';
+}
+function hidePostRecordBar() {
+  const bar = document.getElementById('post-rec-save');
+  if (bar) bar.style.display = 'none';
+}
+function sessSaveAndReview() {
+  sessSave(() => { hidePostRecordBar(); switchTab('review'); });
+}
+function skipPostRecordSave() {
+  hidePostRecordBar();
+  switchTab('review');
+}
+
 // ── Session files ─────────────────────────────────────────────────────────────
-function sessSave() {
-  const name = (document.getElementById('sess-save-name').value.trim()) || 'session.json';
+function sessSave(onDone) {
+  const name = (document.getElementById('sess-save-name-inline').value.trim()) || 'session.json';
   fetch(API+'/api/session/save', {
     method:'POST', headers:{'Content-Type':'application/json'},
     body: JSON.stringify({filename: name})
   }).then(r=>r.json()).then(d => {
     showMsg(d.ok ? `✓ Saved ${d.frames} frames → ${d.path}` : '✗ '+d.error, d.ok);
-    if (d.ok) refreshSessions();
+    if (d.ok) {
+      refreshSessions();
+      syncExportNames(name.replace(/\.json$/i, ''));
+    }
+    if (onDone) onDone();
   });
 }
 
@@ -1203,6 +1272,7 @@ function sessLoad() {
       showMsg(`✓ Loaded ${d.frames} frames (${d.duration}s)`, true);
       updateSessionInfo(sel.value, d.frames, d.duration);
       WF.load();
+      syncExportNames(sel.value.replace(/\.json$/i, ''));
       // Re-sync audio dropdown to whatever the loaded session stored
       pollStatus._audioSynced = false;
       // Don't auto-switch tab — user may still need to set audio before reviewing
@@ -1413,7 +1483,7 @@ function exportFseq() {
           }).join('');
           mapBox.style.display = 'block';
         }
-        setStep(4);
+        markExported();
       } else { msg.style.color='#e63946'; msg.textContent='✗ '+d.error; }
     });
 }
@@ -1445,7 +1515,7 @@ function exportXlights() {
           dl.appendChild(a);
         }
         dl.style.display='flex';
-        setStep(4);
+        markExported();
         if (d.xsq_error) { msg.textContent+='  (XSQ: '+d.xsq_error+')'; msg.style.color='#fb8500'; }
       } else { msg.style.color='#e63946'; msg.textContent='✗ '+d.error; }
     });
@@ -1461,7 +1531,7 @@ function pollStatus() {
     document.getElementById('btn-srec').style.display = s.recording ? '':'none';
     document.getElementById('rec-info').innerHTML = s.duration_str+' &nbsp;·&nbsp; '+s.frame_count+' frames';
 
-    if (s.recording) setStep(2);
+    updateStepper(s);
 
     if (s.playing || s.paused) {
       updateScrubSlider(s.pb_pos);
@@ -1508,15 +1578,15 @@ function pollStatus() {
 
     setLiveBtn(!!s.live_output);
 
-    const ownerCard = document.getElementById('cam-ownership-card');
-    if (ownerCard) ownerCard.style.display = s.cam_running ? 'none':'';
+    handleCameraOwnership(s);
 
     // Servo output health warning in Review tab
     const warn = document.getElementById('servo-warn');
     const warnText = document.getElementById('servo-warn-text');
     if (warn && warnText && s.writer_ok !== undefined) {
       if (!s.writer_ok) {
-        warnText.textContent = '⚠ Servo output not ready — co-other.json not found or pca_output_idx is wrong. Check FPP has a PCA9685 controller configured and save the mapping.';
+        warnText.textContent = "⚠ Servo output isn't connected yet. Make sure FPP has a PCA9685 controller set up, then re-save your mapping.";
+        warnText.title = 'co-other.json not found or pca_output_idx is wrong';
         warn.style.display = '';
       } else if (s.joint_map_count === 0) {
         warnText.textContent = '⚠ No joints are mapped to servo ports. Go to the Map & Test tab, assign joints to ports, then click Save Mapping.';
@@ -1529,17 +1599,54 @@ function pollStatus() {
 }
 
 // ── Camera claim ──────────────────────────────────────────────────────────────
-function claimCamera() {
+// Automatically reclaims the camera from fpp-live-follow (a sibling plugin) up to
+// 3 times; only surfaces a manual fallback if all auto-attempts fail. Handing the
+// camera back to Live Follow, however, is never automatic — that's a deliberate
+// user action via restoreLiveFollow().
+let _camAutoAttempts = 0;
+let _camAutoInFlight  = false;
+
+function handleCameraOwnership(s) {
+  const badge = document.getElementById('cam-status-badge');
+  const recoveryBar = document.getElementById('cam-recovery-bar');
+
+  if (s.cam_running) {
+    _camAutoAttempts = 0;
+    if (badge) badge.style.display = 'none';
+    if (recoveryBar) recoveryBar.style.display = 'none';
+    return;
+  }
+
+  if (recoveryBar && recoveryBar.style.display !== 'none') return; // manual fallback already showing
+
+  if (_camAutoAttempts < 3 && !_camAutoInFlight) {
+    if (badge) { badge.textContent = 'Reconnecting camera…'; badge.style.display = ''; }
+    claimCamera(true);
+  } else if (_camAutoAttempts >= 3) {
+    if (badge) badge.style.display = 'none';
+    if (recoveryBar) recoveryBar.style.display = 'flex';
+  }
+}
+
+function claimCamera(isAuto = false) {
+  _camAutoInFlight = true;
+  if (isAuto) _camAutoAttempts++;
   const msg = document.getElementById('cam-claim-msg');
-  msg.style.color='#888'; msg.textContent='Releasing from Live Follow…';
+  if (msg) { msg.style.color='#888'; msg.textContent='Releasing from Live Follow…'; }
   fetch('/fpp-live-follow-api/api/camera/release', {method:'POST'}).catch(()=>null)
-    .then(() => { msg.textContent='Opening camera…'; return fetch(API+'/api/camera/retry', {method:'POST'}); })
+    .then(() => { if (msg) msg.textContent='Opening camera…'; return fetch(API+'/api/camera/retry', {method:'POST'}); })
     .then(r=>r.json()).then(d => {
+      _camAutoInFlight = false;
       if (d.cam_running) {
-        msg.style.color='#06d6a0'; msg.textContent='✓ Camera claimed';
-        document.getElementById('cam-ownership-card').style.display='none';
-      } else { msg.style.color='#e63946'; msg.textContent='✗ Camera still unavailable'; }
-    }).catch(() => { msg.style.color='#e63946'; msg.textContent='✗ Could not reach daemon'; });
+        _camAutoAttempts = 0;
+        if (msg) { msg.style.color='#06d6a0'; msg.textContent='✓ Camera claimed'; }
+        const recoveryBar = document.getElementById('cam-recovery-bar');
+        if (recoveryBar) recoveryBar.style.display = 'none';
+      } else if (msg) { msg.style.color='#e63946'; msg.textContent='✗ Camera still unavailable'; }
+    }).catch(() => {
+      _camAutoInFlight = false;
+      if (msg) { msg.style.color='#e63946'; msg.textContent='✗ Could not reach daemon'; }
+    });
 }
 
 function restoreLiveFollow() {
