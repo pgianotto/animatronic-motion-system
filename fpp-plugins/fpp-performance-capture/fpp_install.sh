@@ -116,8 +116,6 @@ printf '<IfModule mod_proxy.c>\n    ProxyPass        /fpp-capture-api/ http://lo
 sudo ln -sf "$PROXY_CONF" /etc/apache2/conf-enabled/fpp-capture-proxy.conf
 sudo systemctl reload apache2 2>/dev/null || true
 
-chmod +x "$PLUGIN_DIR/scripts/preStart.sh"
-
 # Allow root (used by FPP's plugin manager) to run git in this directory.
 # Without this, git 2.35+ rejects pull/fetch from root in fpp-owned dirs.
 sudo git config --system --add safe.directory "$(cd "$PLUGIN_DIR/../.." && pwd)" 2>/dev/null || true
