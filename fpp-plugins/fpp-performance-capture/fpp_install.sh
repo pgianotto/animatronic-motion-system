@@ -8,6 +8,10 @@ echo "Installing/updating Animatronic Performance Capture plugin..."
 # ── System packages (skip if already installed) ──────────────────────────────
 if ! dpkg -s python3-opencv &>/dev/null 2>&1; then
     echo "Installing system packages..."
+    # Recover from a prior interrupted apt/dpkg run (e.g. an OS upgrade or a
+    # timed-out plugin install) — otherwise apt-get refuses to proceed at all.
+    sudo dpkg --configure -a || true
+    export DEBIAN_FRONTEND=noninteractive
     sudo apt-get update -qq
     sudo apt-get install -y python3-pip python3-opencv v4l-utils curl
 fi
