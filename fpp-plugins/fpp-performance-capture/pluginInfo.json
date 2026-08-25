@@ -1,5 +1,5 @@
 {
-    "repoName": "fpp-performance-capture",
+    "repoName": "animatronic-motion-system",
     "name": "Animatronic Performance Capture",
     "author": "pgianotto",
     "description": "Record a performer's head pose, facial expressions, and body movement. Play back through servos and export directly to FPP's sequence folder as an FSEQ v2 file.",
@@ -7,6 +7,8 @@
     "srcURL": "https://github.com/pgianotto/animatronic-motion-system.git",
     "bugURL": "https://github.com/pgianotto/animatronic-motion-system/issues",
     "allowUpdates": 1,
+    "minMemoryMB": 1024,
+    "minCpuCores": 4,
     "versions": [
         {
             "minFPPVersion": "9.5",

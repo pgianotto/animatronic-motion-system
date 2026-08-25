@@ -35,11 +35,50 @@ from core.tracker import Tracker
 from modes.motion_capture import MotionCaptureMode
 
 CFG_PATH      = Path('/home/fpp/media/config/animatronic_capture.json')
-CO_OTHER_PATH = Path('/home/fpp/media/config/co-other.json')
 FSEQ_DIR  = Path('/home/fpp/media/sequences')
 SESS_DIR  = Path('/home/fpp/media/animations')
 MEDIA_DIR = Path('/home/fpp/media/music')
 PORT      = 5002
+
+
+def _tee_stdio_to_fpp_log():
+    """Mirror stdout/stderr into FPP's log dir so this service's output shows
+    up in FPP's log viewer and Support Zip, not just wherever systemd sends it."""
+    log_dir = '/home/fpp/media/logs'
+    try:
+        conn = http.client.HTTPConnection('localhost', 80, timeout=2)
+        conn.request('GET', '/api/settings/logDirectory')
+        resp = conn.getresponse()
+        val = json.loads(resp.read())
+        conn.close()
+        if isinstance(val, dict):
+            val = val.get('value') or val.get('logDirectory')
+        if isinstance(val, str) and val:
+            log_dir = val
+    except Exception:
+        pass
+
+    class _Tee:
+        def __init__(self, *streams):
+            self._streams = streams
+
+        def write(self, data):
+            for s in self._streams:
+                s.write(data)
+
+        def flush(self):
+            for s in self._streams:
+                s.flush()
+
+    try:
+        log_fh = open(Path(log_dir) / 'plugin-fpp-performance-capture.log', 'a', buffering=1)
+        sys.stdout = _Tee(sys.stdout, log_fh)
+        sys.stderr = _Tee(sys.stderr, log_fh)
+    except Exception:
+        pass
+
+
+_tee_stdio_to_fpp_log()
 
 DEFAULTS = {
     'smoothing':          0.15,  # joint value smoothing (lower = smoother/slower)
@@ -100,9 +139,21 @@ def _interp_val(t: float, timestamps: list, values: list) -> float:
 
 
 
+def _get_co_other_config() -> dict:
+    """Fetch co-other.json's contents through FPP's documented channel-output
+    API rather than reading the config file directly — the file's format is
+    not a stable contract across FPP releases."""
+    conn = http.client.HTTPConnection('localhost', 80, timeout=3)
+    try:
+        conn.request('GET', '/api/channel/output/co-other')
+        return json.loads(conn.getresponse().read())
+    finally:
+        conn.close()
+
+
 def _load_co_other(out_idx: int) -> dict | None:
     try:
-        cfg     = json.loads(CO_OTHER_PATH.read_text())
+        cfg     = _get_co_other_config()
         outputs = [o for o in cfg.get('channelOutputs', [])
                    if o.get('ports')]
         return outputs[out_idx] if 0 <= out_idx < len(outputs) else None
@@ -236,8 +287,8 @@ class OverlayWriter:
     def _send_one(self, conn, fpp_ch: int, body: str):
         try:
             if conn is None:
-                conn = http.client.HTTPConnection('127.0.0.1', 32322, timeout=0.1)
-            conn.request('PUT', f'/overlays/range/{fpp_ch}', body,
+                conn = http.client.HTTPConnection('127.0.0.1', 80, timeout=0.1)
+            conn.request('PUT', f'/api/overlays/range/{fpp_ch}', body,
                          {'Content-Type': 'application/json'})
             conn.getresponse().read()
         except Exception as exc:
@@ -1179,4 +1230,4 @@ if __name__ == '__main__':
     signal.signal(signal.SIGTERM, _shutdown)
     signal.signal(signal.SIGINT,  _shutdown)
     print(f'[Capture] Daemon starting on port {PORT}')
-    app.run(host='0.0.0.0', port=PORT, threaded=True)
+    app.run(host='127.0.0.1', port=PORT, threaded=True)
