@@ -1,17 +1,21 @@
 #!/usr/bin/env python3
 import sys, json, time
+import http.client
 import smbus2
-
-CONFIG = '/home/fpp/media/config/co-other.json'
 
 def err(msg):
     print(json.dumps({'status': 'error', 'message': msg}))
     sys.exit(1)
 
 def load_output(idx):
+    # Fetch co-other.json's contents through FPP's documented channel-output
+    # API rather than reading the config file directly — the file's format is
+    # not a stable contract across FPP releases.
     try:
-        with open(CONFIG) as f:
-            cfg = json.load(f)
+        conn = http.client.HTTPConnection('localhost', 80, timeout=3)
+        conn.request('GET', '/api/channel/output/co-other')
+        cfg = json.loads(conn.getresponse().read())
+        conn.close()
     except Exception as e:
         err(f'Config read: {e}')
     outputs = [o for o in cfg.get('channelOutputs', [])
