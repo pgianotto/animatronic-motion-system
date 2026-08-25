@@ -56,13 +56,11 @@ CORE_DIR="/home/fpp/media/animatronic"
 if [ -d "$CORE_DIR/.git" ]; then
     echo "Updating shared core library..."
     chown -R fpp:fpp "$CORE_DIR" 2>/dev/null || true
-    sudo -u fpp git -C "$CORE_DIR" fetch --quiet && \
-        sudo -u fpp git -C "$CORE_DIR" reset --hard "$CORE_SHA" --quiet || \
+    sudo -u fpp git -C "$CORE_DIR" fetch --quiet && sudo -u fpp git -C "$CORE_DIR" checkout --quiet "$CORE_SHA" || \
         echo "  WARNING: git update failed — using existing core"
 else
     echo "Cloning shared core library..."
-    sudo -u fpp git clone --quiet https://github.com/pgianotto/animatronic-motion-system.git "$CORE_DIR" && \
-        sudo -u fpp git -C "$CORE_DIR" reset --hard "$CORE_SHA" --quiet || \
+    sudo -u fpp git clone --quiet https://github.com/pgianotto/animatronic-motion-system.git "$CORE_DIR" && sudo -u fpp git -C "$CORE_DIR" checkout --quiet "$CORE_SHA" || \
         echo "  WARNING: git clone failed — tracking code may not work"
 fi
 
