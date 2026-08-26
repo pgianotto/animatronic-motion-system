@@ -2,18 +2,28 @@
 """Persistent servo daemon for fpp-servo-calibrator.
 Keeps the I2C bus open so per-command latency is ~2ms instead of ~150ms."""
 from http.server import HTTPServer, BaseHTTPRequestHandler
+import http.client
 import json, os, signal, sys, time
 import smbus2
 
-CONFIG   = '/home/fpp/media/config/co-other.json'
 HOST     = '127.0.0.1'
 PORT_NUM = 5003
 
 outputs = []
 
+def _get_co_other_config() -> dict:
+    # Fetch co-other.json's contents through FPP's documented channel-output
+    # API rather than reading the config file directly — the file's format is
+    # not a stable contract across FPP releases.
+    conn = http.client.HTTPConnection('localhost', 80, timeout=3)
+    try:
+        conn.request('GET', '/api/channel/output/co-other')
+        return json.loads(conn.getresponse().read())
+    finally:
+        conn.close()
+
 def load_outputs():
-    with open(CONFIG) as f:
-        cfg = json.load(f)
+    cfg = _get_co_other_config()
     result = []
     for out in cfg.get('channelOutputs', []):
         if not out.get('ports') or not out.get('enabled'):

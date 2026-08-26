@@ -32,18 +32,18 @@ if [ ! -d "$PLUGIN_DIR/venv" ]; then
     echo "Creating Python venv and installing packages..."
     chown -R fpp:fpp /home/fpp/.cache /home/fpp/.local 2>/dev/null || true
     if python3 -c "import sys; assert sys.version_info[:2] == (3,11)" 2>/dev/null; then
-        sudo -u fpp python3 -m venv "$PLUGIN_DIR/venv"
-        sudo -u fpp "$PLUGIN_DIR/venv/bin/pip" install --quiet \
+        runuser -u fpp -- python3 -m venv "$PLUGIN_DIR/venv"
+        runuser -u fpp -- "$PLUGIN_DIR/venv/bin/pip" install --quiet \
             flask pyyaml smbus2 "mediapipe==0.10.9" RPi.GPIO 2>/dev/null || \
-        sudo -u fpp "$PLUGIN_DIR/venv/bin/pip" install --quiet \
+        runuser -u fpp -- "$PLUGIN_DIR/venv/bin/pip" install --quiet \
             flask pyyaml smbus2 "mediapipe==0.10.9"
     else
-        sudo -u fpp env HOME=/home/fpp PATH=/usr/local/bin:/usr/bin:/bin UV_NO_CACHE=1 \
+        runuser -u fpp -- env HOME=/home/fpp PATH=/usr/local/bin:/usr/bin:/bin UV_NO_CACHE=1 \
             uv venv --python 3.11 "$PLUGIN_DIR/venv"
-        sudo -u fpp env HOME=/home/fpp PATH=/usr/local/bin:/usr/bin:/bin UV_NO_CACHE=1 \
+        runuser -u fpp -- env HOME=/home/fpp PATH=/usr/local/bin:/usr/bin:/bin UV_NO_CACHE=1 \
             uv pip install --python "$PLUGIN_DIR/venv/bin/python" \
             flask pyyaml smbus2 "mediapipe==0.10.9" RPi.GPIO 2>/dev/null || \
-        sudo -u fpp env HOME=/home/fpp PATH=/usr/local/bin:/usr/bin:/bin UV_NO_CACHE=1 \
+        runuser -u fpp -- env HOME=/home/fpp PATH=/usr/local/bin:/usr/bin:/bin UV_NO_CACHE=1 \
             uv pip install --python "$PLUGIN_DIR/venv/bin/python" \
             flask pyyaml smbus2 "mediapipe==0.10.9"
     fi
@@ -56,11 +56,11 @@ CORE_DIR="/home/fpp/media/animatronic"
 if [ -d "$CORE_DIR/.git" ]; then
     echo "Updating shared core library..."
     chown -R fpp:fpp "$CORE_DIR" 2>/dev/null || true
-    sudo -u fpp git -C "$CORE_DIR" fetch --quiet && sudo -u fpp git -C "$CORE_DIR" checkout --quiet b6f63a070bff09687ca47460b1927fd2edeb9004 || \
+    runuser -u fpp -- git -C "$CORE_DIR" fetch --quiet && runuser -u fpp -- git -C "$CORE_DIR" checkout --quiet b6f63a070bff09687ca47460b1927fd2edeb9004 || \
         echo "  WARNING: git update failed — using existing core"
 else
     echo "Cloning shared core library..."
-    sudo -u fpp git clone --quiet https://github.com/pgianotto/animatronic-motion-system.git "$CORE_DIR" && sudo -u fpp git -C "$CORE_DIR" checkout --quiet b6f63a070bff09687ca47460b1927fd2edeb9004 || \
+    runuser -u fpp -- git clone --quiet https://github.com/pgianotto/animatronic-motion-system.git "$CORE_DIR" && runuser -u fpp -- git -C "$CORE_DIR" checkout --quiet b6f63a070bff09687ca47460b1927fd2edeb9004 || \
         echo "  WARNING: git clone failed — tracking code may not work"
 fi
 
