@@ -21,5 +21,29 @@
       "branch": "master",
       "sha": ""
     }
-  ]
+  ],
+  "privacy": {
+    "summary": "Records a performer's head, face and body movement from your camera as timed position values (not video) so it can be played back through servos or exported as a sequence. Recordings stay on this device until you delete them.",
+    "sends": [],
+    "collects": [
+      {
+        "what": "recorded head, face and body movement (position and timing values, not video)",
+        "about": "performers",
+        "keptDays": null,
+        "canDelete": true,
+        "where": "media/animations/ (manage or delete from the plugin's Record and Review tabs)"
+      }
+    ],
+    "sensors": [
+      { "type": "camera", "stored": false },
+      { "type": "face-tracking", "stored": true },
+      { "type": "body-tracking", "stored": true }
+    ],
+    "remoteAccess": "none",
+    "systemChanges": [
+      { "kind": "service", "what": "installs and enables a systemd service running the capture daemon, and an Apache proxy route on FPP's web server" }
+    ],
+    "closedCode": false,
+    "other": "none"
+  }
 }
