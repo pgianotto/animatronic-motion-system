@@ -1,5 +1,5 @@
 {
-  "repoName": "fpp-performance-capture",
+  "repoName": "animatronic-motion-system",
   "name": "Animatronic Performance Capture",
   "version": "1.1.0",
   "author": "pgianotto",
@@ -7,7 +7,10 @@
   "homeURL": "https://github.com/pgianotto/animatronic-motion-system",
   "srcURL": "https://github.com/pgianotto/animatronic-motion-system.git",
   "bugURL": "https://github.com/pgianotto/animatronic-motion-system/issues",
+  "iconURL": "https://raw.githubusercontent.com/pgianotto/animatronic-motion-system/master/icon.png",
   "allowUpdates": 1,
+  "minMemoryMB": 1024,
+  "minCpuCores": 4,
   "versions": [
     {
       "minFPPVersion": "9.5",
@@ -23,8 +26,10 @@
     }
   ],
   "privacy": {
-    "summary": "Records a performer's head, face and body movement from your camera as timed position values (not video) so it can be played back through servos or exported as a sequence. Recordings stay on this device until you delete them.",
-    "sends": [],
+    "summary": "Records a performer's head, face and body movement from your camera as timed position values (not video) for servo playback or export. Recordings stay on this device until you delete them.",
+    "sends": [
+      { "to": "storage.googleapis.com", "what": "a request for the face/body tracking model file (no personal or performance data)", "why": "one-time download of MediaPipe's tracking model the first time tracking is used", "alwaysOn": false }
+    ],
     "collects": [
       {
         "what": "recorded head, face and body movement (position and timing values, not video)",
@@ -41,7 +46,8 @@
     ],
     "remoteAccess": "none",
     "systemChanges": [
-      { "kind": "service", "what": "installs and enables a systemd service running the capture daemon, and an Apache proxy route on FPP's web server" }
+      { "kind": "service", "what": "installs and enables the fpp-performance-capture systemd service running the capture daemon" },
+      { "kind": "core-settings", "what": "writes /etc/apache2/conf-enabled/fpp-capture-proxy.conf, an Apache proxy route on FPP's web server" }
     ],
     "closedCode": false,
     "other": "none"

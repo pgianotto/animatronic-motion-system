@@ -25,8 +25,10 @@
         }
     ],
     "privacy": {
-        "summary": "Records a performer's head, face and body movement from your camera as timed position values (not video) so it can be played back through servos or exported as a sequence. Recordings stay on this device until you delete them.",
-        "sends": [],
+        "summary": "Records a performer's head, face and body movement from your camera as timed position values (not video) for servo playback or export. Recordings stay on this device until you delete them.",
+        "sends": [
+            { "to": "storage.googleapis.com", "what": "a request for the face/body tracking model file (no personal or performance data)", "why": "one-time download of MediaPipe's tracking model the first time tracking is used", "alwaysOn": false }
+        ],
         "collects": [
             {
                 "what": "recorded head, face and body movement (position and timing values, not video)",
@@ -43,7 +45,8 @@
         ],
         "remoteAccess": "none",
         "systemChanges": [
-            { "kind": "service", "what": "installs and enables a systemd service running the capture daemon, and an Apache proxy route on FPP's web server" }
+            { "kind": "service", "what": "installs and enables the fpp-performance-capture systemd service running the capture daemon" },
+            { "kind": "core-settings", "what": "writes /etc/apache2/conf-enabled/fpp-capture-proxy.conf, an Apache proxy route on FPP's web server" }
         ],
         "closedCode": false,
         "other": "none"
