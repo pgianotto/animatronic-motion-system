@@ -49,33 +49,27 @@ if [ ! -d "$PLUGIN_DIR/venv" ]; then
     fi
 fi
 
-# ── Clone or update shared Python core from animatronic-motion-system ────────
-# Pinned deliberately to a literal sha (not a variable) — bump it only after
-# reviewing what changed upstream.
-CORE_DIR="/home/fpp/media/animatronic"
-if [ -d "$CORE_DIR/.git" ]; then
-    echo "Updating shared core library..."
-    chown -R fpp:fpp "$CORE_DIR" 2>/dev/null || true
-    runuser -u fpp -- git -C "$CORE_DIR" fetch --quiet && runuser -u fpp -- git -C "$CORE_DIR" checkout --quiet b6f63a070bff09687ca47460b1927fd2edeb9004 || \
-        echo "  WARNING: git update failed — using existing core"
-else
-    echo "Cloning shared core library..."
-    runuser -u fpp -- git clone --quiet https://github.com/pgianotto/animatronic-motion-system.git "$CORE_DIR" && runuser -u fpp -- git -C "$CORE_DIR" checkout --quiet b6f63a070bff09687ca47460b1927fd2edeb9004 || \
-        echo "  WARNING: git clone failed — tracking code may not work"
-fi
+# ── Shared core library — copied from this plugin's own checkout ─────────────
+# This plugin's repo IS animatronic-motion-system (srcURL clones the whole
+# thing), so core/modes/xlights already exist two levels up, at exactly the
+# commit FPP just installed. No separate clone needed, and no risk of
+# content.php running against a different core/ version than it shipped with
+# (the previous approach re-cloned the same repo to a literal pinned sha,
+# which could drift from what was actually checked out here).
+REPO_ROOT="$(cd "$PLUGIN_DIR/../.." && pwd)"
 
 mkdir -p "$LIB_DIR"
 for d in core modes xlights; do
-    if [ -d "$CORE_DIR/$d" ]; then
+    if [ -d "$REPO_ROOT/$d" ]; then
         rm -rf "$LIB_DIR/$d"
-        cp -r "$CORE_DIR/$d" "$LIB_DIR/$d"
+        cp -r "$REPO_ROOT/$d" "$LIB_DIR/$d"
         echo "  Copied $d/"
     else
-        echo "  WARNING: $CORE_DIR/$d not found — tracking code may not work."
+        echo "  WARNING: $REPO_ROOT/$d not found — tracking code may not work."
     fi
 done
 
-[ -f "$CORE_DIR/config.yaml" ] && cp "$CORE_DIR/config.yaml" "$LIB_DIR/config.yaml"
+[ -f "$REPO_ROOT/config.yaml" ] && cp "$REPO_ROOT/config.yaml" "$LIB_DIR/config.yaml"
 
 # ── systemd service (always write so updates stay current) ────────────────────
 SERVICE="/etc/systemd/system/fpp-performance-capture.service"
@@ -115,6 +109,6 @@ systemctl reload apache2 2>/dev/null || true
 
 # Allow root (used by FPP's plugin manager) to run git in this directory.
 # Without this, git 2.35+ rejects pull/fetch from root in fpp-owned dirs.
-git config --system --add safe.directory "$(cd "$PLUGIN_DIR/../.." && pwd)" 2>/dev/null || true
+git config --system --add safe.directory "$REPO_ROOT" 2>/dev/null || true
 
 echo "Done. Access via FPP menu: Plugins > Animatronic Capture"

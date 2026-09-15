@@ -12,8 +12,8 @@ Real-time face tracking. Moves pan/tilt servos to keep a detected face centered 
 ### [Animatronic Performance Capture](fpp-plugins/fpp-performance-capture/README.md)
 Records a performer's head pose, facial expressions, and body movement via camera. Play back through servos in real time or export directly to FPP as an FSEQ v2 sequence file. Requires the Servo Calibrator plugin.
 
-### [FPP Servo Calibrator](fpp-plugins/fpp-servo-calibrator/README.md)
-Mixer-style per-channel servo calibration for PCA9685 outputs. Set min/max/center values with live faders and save back to FPP's `co-other.json`. **Install this first** — Performance Capture reads its calibration data.
+### [FPP Servo Calibrator](https://github.com/pgianotto/fpp-servo-calibrator)
+Mixer-style per-channel servo calibration for PCA9685 outputs. Set min/max/center values with live faders and save back to FPP's `co-other.json`. **Install this first** — Performance Capture reads its calibration data. Lives in its own repo.
 
 ---
 
