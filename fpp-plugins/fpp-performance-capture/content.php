@@ -126,19 +126,19 @@ $step_time_ms = intval($cfg['step_time_ms'] ?? 50);
 .pc-msg  { font-size:11px; min-height:16px; }
 .pc-hint { color:#555; font-size:11px; line-height:1.5; margin:0 0 8px; }
 
-/* ── Tabs (also act as the step/progress indicator) ────────────────────────── */
-.pc-tabs  { display:flex; gap:0; margin-bottom:16px; border-bottom:2px solid var(--div); }
-.pc-tab   { display:flex; align-items:center; gap:8px; padding:9px 22px; cursor:pointer; font-size:12px; font-weight:bold;
-            letter-spacing:0.8px; text-transform:uppercase; color:var(--muted);
-            border-bottom:2px solid transparent; margin-bottom:-2px; }
-.pc-tab:hover  { color:var(--fg); }
-.pc-tab.active { color:var(--cyan); border-bottom-color:var(--cyan); }
-.pc-tab .sn { width:18px; height:18px; border-radius:50%; border:1px solid #444;
-              display:flex; align-items:center; justify-content:center; font-size:9px; flex-shrink:0;
-              color:#666; }
-.pc-tab.active .sn { border-color:var(--cyan); background:var(--cyan); color:#000; }
-.pc-tab.done .sn   { border-color:#2a4a3a; background:#2a4a3a; color:#06d6a0; }
-.pc-tab.done.active .sn { border-color:var(--cyan); background:var(--cyan); color:#000; }
+/* ── Tabs — styled to match FPP's Plugin Manager (Bootstrap .nav-tabs) ─────────
+   FPP's plugins.php rounds the top corners of its tabs to 12px and thickens the
+   strip's bottom rule to 3px; we mirror that here so both tab strips (main step
+   tabs + the export sub-tabs) read like a native FPP page. The step-number chip
+   in front of each main-tab label reuses Bootstrap's .badge. */
+#pc-maintabs.nav-tabs,
+#pc-exptabs.nav-tabs   { border-bottom-width:3px; margin-bottom:16px; }
+#pc-maintabs .nav-link,
+#pc-exptabs  .nav-link { border-top-left-radius:12px; border-top-right-radius:12px;
+                         text-transform:uppercase; letter-spacing:0.8px;
+                         font-size:12px; font-weight:bold; }
+#pc-maintabs .pc-sn                 { font-size:9px; }
+#pc-maintabs .nav-link.done .pc-sn  { background:var(--bs-success, #198754) !important; }
 .pc-tabpanel   { display:none; }
 .pc-tabpanel.active { display:block; }
 
@@ -149,12 +149,6 @@ $step_time_ms = intval($cfg['step_time_ms'] ?? 50);
 .live-toggle-card .live-desc p { color:#555; font-size:11px; line-height:1.5; margin:4px 0 0; }
 .btn-live-main { padding:12px 28px; font-size:14px; }
 
-.exp-tabs { display:flex; gap:0; margin-bottom:16px; border-bottom:2px solid var(--div); }
-.exp-tab  { padding:8px 20px; cursor:pointer; font-size:12px; font-weight:bold;
-            letter-spacing:0.8px; text-transform:uppercase; color:var(--muted);
-            border-bottom:2px solid transparent; margin-bottom:-2px; }
-.exp-tab:hover  { color:var(--fg); }
-.exp-tab.active { color:var(--cyan); border-bottom-color:var(--cyan); }
 .exp-panel      { display:none; }
 .exp-panel.active { display:block; }
 
@@ -178,11 +172,23 @@ $step_time_ms = intval($cfg['step_time_ms'] ?? 50);
 <div class="pc-wrap">
 
 <!-- ══ Tabs (also the step/progress indicator) ══════════════════════════════ -->
-<div class="pc-tabs">
-  <div class="pc-tab active" id="tab-btn-map-test" data-tab="map-test" onclick="switchTab('map-test')"><span class="sn">1</span>Map &amp; Test</div>
-  <div class="pc-tab"        id="tab-btn-record"   data-tab="record"   onclick="switchTab('record')"><span class="sn">2</span>Record</div>
-  <div class="pc-tab"        id="tab-btn-review"   data-tab="review"   onclick="switchTab('review')"><span class="sn">3</span>Review &amp; Export</div>
-</div>
+<ul class="nav nav-tabs flex-nowrap flex-md-wrap overflow-x-auto overflow-y-hidden" id="pc-maintabs" role="tablist">
+  <li class="nav-item" role="presentation">
+    <button type="button" class="nav-link active text-nowrap" id="tab-btn-map-test" data-tab="map-test" role="tab" onclick="switchTab('map-test')">
+      <span class="badge bg-secondary me-1 pc-sn">1</span>Map &amp; Test
+    </button>
+  </li>
+  <li class="nav-item" role="presentation">
+    <button type="button" class="nav-link text-nowrap" id="tab-btn-record" data-tab="record" role="tab" onclick="switchTab('record')">
+      <span class="badge bg-secondary me-1 pc-sn">2</span>Record
+    </button>
+  </li>
+  <li class="nav-item" role="presentation">
+    <button type="button" class="nav-link text-nowrap" id="tab-btn-review" data-tab="review" role="tab" onclick="switchTab('review')">
+      <span class="badge bg-secondary me-1 pc-sn">3</span>Review &amp; Export
+    </button>
+  </li>
+</ul>
 
 <!-- ══════════════════════════════════════════════════════════════════════════
      TAB 1 — MAP & TEST
@@ -524,10 +530,14 @@ $step_time_ms = intval($cfg['step_time_ms'] ?? 50);
   </div>
 
   <!-- Export type tabs -->
-  <div class="exp-tabs">
-    <div class="exp-tab active" data-exp="fpp"     onclick="switchExportTab('fpp')">FPP Direct</div>
-    <div class="exp-tab"        data-exp="xlights" onclick="switchExportTab('xlights')">xLights</div>
-  </div>
+  <ul class="nav nav-tabs" id="pc-exptabs" role="tablist">
+    <li class="nav-item" role="presentation">
+      <button type="button" class="nav-link active text-nowrap" data-exp="fpp" role="tab" onclick="switchExportTab('fpp')">FPP Direct</button>
+    </li>
+    <li class="nav-item" role="presentation">
+      <button type="button" class="nav-link text-nowrap" data-exp="xlights" role="tab" onclick="switchExportTab('xlights')">xLights</button>
+    </li>
+  </ul>
 
   <!-- FPP Direct panel -->
   <div class="exp-panel active" id="exp-fpp">
@@ -634,7 +644,7 @@ let JM_built  = false;
 const STREAM_URL = API + '/stream';
 
 function switchTab(name) {
-  document.querySelectorAll('.pc-tab').forEach(t =>
+  document.querySelectorAll('#pc-maintabs .nav-link').forEach(t =>
     t.classList.toggle('active', t.dataset.tab === name));
   document.querySelectorAll('.pc-tabpanel').forEach(p =>
     p.classList.toggle('active', p.id === 'tab-' + name));
@@ -1830,7 +1840,7 @@ function exportFseq() {
 }
 
 function switchExportTab(name) {
-  document.querySelectorAll('.exp-tab').forEach(t =>
+  document.querySelectorAll('#pc-exptabs .nav-link').forEach(t =>
     t.classList.toggle('active', t.dataset.exp === name));
   document.querySelectorAll('.exp-panel').forEach(p =>
     p.classList.toggle('active', p.id === 'exp-' + name));
