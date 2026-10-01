@@ -8,6 +8,8 @@ Falls back to OpenCV Haar cascade for face if downloads fail (live tracking
 still works; motion-capture expression/body values will be zero).
 """
 
+import subprocess
+import sys
 import time
 import urllib.request
 from dataclasses import dataclass, field
@@ -48,6 +50,41 @@ _L_WRIST       = 15
 _R_WRIST       = 16
 _L_HIP         = 23
 _R_HIP         = 24
+
+
+# mediapipe loads its native library lazily, inside create_from_options. A
+# wheel built for CPU features this machine lacks (mediapipe 1.0.x needs ARMv8
+# AES, which a Pi 4 doesn't have) dies there with SIGILL — that kills the whole
+# process, so no try/except can reach the Haar fallback. Creating one detector
+# in a throwaway child process first turns that crash into a clean "no".
+_PROBE_SCRIPT = """
+import sys
+from mediapipe.tasks import python as p
+from mediapipe.tasks.python import vision as v
+v.FaceLandmarker.create_from_options(v.FaceLandmarkerOptions(
+    base_options=p.BaseOptions(model_asset_path=sys.argv[1])))
+"""
+_probe_result: Optional[bool] = None   # cached: one probe per process
+
+
+def _native_mediapipe_ok() -> bool:
+    global _probe_result
+    if _probe_result is None:
+        try:
+            r = subprocess.run([sys.executable, "-c", _PROBE_SCRIPT, str(_FACE_MODEL_PATH)],
+                               capture_output=True, text=True, timeout=120)
+            _probe_result = r.returncode == 0
+            if not _probe_result:
+                detail = (r.stderr.strip().splitlines() or [""])[-1]
+                print(f"[Tracker] mediapipe can't run on this CPU/Python "
+                      f"(probe exit {r.returncode}): {detail}")
+        except subprocess.TimeoutExpired:
+            print("[Tracker] mediapipe probe timed out.")
+            _probe_result = False
+        except Exception as exc:
+            print(f"[Tracker] mediapipe probe failed to run: {exc}")
+            _probe_result = False
+    return _probe_result
 
 
 @dataclass
@@ -118,6 +155,8 @@ class Tracker:
 
             # --- Face landmarker ---
             if not _ensure_model(_FACE_MODEL_PATH, _FACE_MODEL_URL, "face (~2.5 MB)"):
+                return False
+            if not _native_mediapipe_ok():
                 return False
             face_opts = mp_vision.FaceLandmarkerOptions(
                 base_options=mp_python.BaseOptions(model_asset_path=str(_FACE_MODEL_PATH)),
