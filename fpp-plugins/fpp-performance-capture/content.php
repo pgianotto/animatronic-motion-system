@@ -15,54 +15,44 @@ $step_time_ms = intval($cfg['step_time_ms'] ?? 50);
 ?>
 
 <style>
-:root {
-  --bg:      #1a1a2e;
-  --panel:   #16213e;
-  --accent:  #0f3460;
-  --cyan:    #4cc9f0;
-  --green:   #06d6a0;
-  --magenta: #f72585;
-  --amber:   #fb8500;
-  --purple:  #7209b7;
-  --red:     #e63946;
-  --fg:      #e0e0e0;
-  --muted:   #888;
-  --dark:    #0d0d1f;
-  --div:     #1a1a3e;
+/* All colours come from Bootstrap 5.3's theme variables so the page follows
+   FPP's light/dark theme (PLUGIN_GUIDELINES.md §8.2). The short names below are
+   scoped to this plugin and only alias those variables. */
+.pc-wrap {
+  --panel:   var(--bs-tertiary-bg);
+  --accent:  var(--bs-body-bg);                  /* input / control background */
+  --cyan:    var(--bs-info-text-emphasis);       /* face channels, accent text */
+  --green:   var(--bs-success-text-emphasis);
+  --magenta: var(--bs-primary-text-emphasis);    /* card headings */
+  --amber:   var(--bs-warning-text-emphasis);    /* body channels, warnings */
+  --red:     var(--bs-danger-text-emphasis);
+  --fg:      var(--bs-body-color);
+  --muted:   var(--bs-secondary-color);
+  --faint:   var(--bs-tertiary-color);
+  --dark:    var(--bs-secondary-bg);             /* inset areas, bar tracks */
+  --div:     var(--bs-border-color);
+  max-width:1100px;
 }
-
-.pc-wrap { max-width:1100px; }
-.pc-card { background:var(--panel); border-radius:8px; padding:18px; margin-bottom:14px; }
+.pc-card { background:var(--panel); border:1px solid var(--div); border-radius:var(--bs-border-radius-lg);
+           padding:18px; margin-bottom:14px; }
 .pc-card h3 { color:var(--magenta); margin:0 0 12px; font-size:11px; letter-spacing:1.5px;
               text-transform:uppercase; font-weight:bold; }
 
 .pc-field  { display:flex; align-items:center; gap:10px; margin-bottom:10px; flex-wrap:wrap; }
-.pc-label  { color:var(--muted); font-size:12px; width:110px; flex-shrink:0; }
+.pc-label  { color:var(--muted); font-size:12px; width:7rem; flex-shrink:0; }
 .pc-value  { color:var(--fg); font-size:13px; font-family:monospace; }
-.pc-input  { background:var(--accent); color:var(--fg); border:1px solid #555;
-             border-radius:4px; padding:5px 9px; font-size:12px; }
-.pc-select { background:var(--accent); color:var(--fg); border:1px solid var(--cyan);
-             border-radius:4px; padding:5px 9px; font-size:12px; }
+.pc-input,
+.pc-select { background:var(--accent); color:var(--fg); border:1px solid var(--div);
+             border-radius:var(--bs-border-radius); padding:5px 9px; font-size:12px; max-width:100%; }
+.pc-input:focus, .pc-select:focus, .jm-sel:focus, .jm-scale-in:focus, .jm-model-in:focus {
+             outline:0; border-color:var(--bs-primary); box-shadow:0 0 0 .2rem rgba(var(--bs-primary-rgb), .25); }
 
-.pc-btn    { padding:6px 16px; border:none; border-radius:5px; font-weight:bold;
-             cursor:pointer; font-size:12px; white-space:nowrap; }
-.btn-rec   { background:var(--magenta); color:#fff; }
-.btn-stop  { background:#2a2a4a; color:var(--muted); border:1px solid #3a3a5a; }
-.btn-play  { background:var(--green);   color:#000; }
-.btn-pause { background:var(--amber);   color:#000; }
-.btn-halt  { background:var(--red);     color:#fff; }
-.btn-export{ background:var(--purple);  color:#fff; }
-.btn-ghost { background:var(--accent);  color:var(--cyan); border:1px solid var(--cyan); }
-.btn-muted { background:#2a2a4a;        color:#555; border:1px solid #333; }
-.btn-live-off { background:var(--dark); color:var(--muted); border:1px solid #555; }
-.btn-live-on  { background:var(--green);color:#000; border:none; animation:blink 1.5s infinite; }
-.btn-sm    { padding:4px 10px; font-size:11px; }
+/* Buttons are Bootstrap .btn variants; this only keeps them on one line. */
+.pc-wrap .btn  { white-space:nowrap; font-weight:bold; }
+.btn-live-on   { animation:blink 1.5s infinite; }
+.btn-live-main { padding:12px 28px; font-size:14px; }
 
-.pc-badge  { display:inline-flex; align-items:center; gap:5px; padding:3px 10px;
-             border-radius:12px; font-size:11px; font-weight:bold; }
-.badge-rec  { background:var(--magenta); color:#fff; animation:blink 1s infinite; }
-.badge-play { background:var(--green);   color:#000; }
-.badge-idle { background:#2a2a4a;        color:#666; }
+.badge-rec  { animation:blink 1s infinite; }
 
 @keyframes blink { 0%,100%{opacity:1} 50%{opacity:.4} }
 
@@ -71,60 +61,66 @@ $step_time_ms = intval($cfg['step_time_ms'] ?? 50);
 .rp-hdr { color:var(--muted); font-size:10px; font-weight:bold; letter-spacing:1.5px;
           text-transform:uppercase; margin-bottom:8px; }
 
-.tv-grid { display:grid; grid-template-columns:1fr 1fr; gap:0 8px; }
+.tv-grid { display:grid; grid-template-columns:repeat(auto-fit, minmax(10rem, 1fr)); gap:0 8px; }
 .tv-grp  { font-size:10px; font-weight:bold; letter-spacing:1px; margin-bottom:4px; }
 .tv-row  { display:flex; justify-content:space-between; align-items:center;
-           padding:1px 0; border-bottom:1px solid var(--dark); }
-.tv-key  { color:#555; font-size:10px; }
+           padding:1px 0; border-bottom:1px solid var(--div); }
+.tv-key  { color:var(--faint); font-size:10px; }
 .tv-val  { color:var(--cyan); font-family:monospace; font-size:10px; }
 .tv-val.body { color:var(--amber); }
 
-.pc-scrub { width:100%; accent-color:var(--cyan); cursor:pointer; height:4px; margin:4px 0 2px; }
+.pc-scrub { width:100%; accent-color:var(--bs-primary); cursor:pointer; height:4px; margin:4px 0 2px; }
 
-.cam-container { position:relative; background:#000; border-radius:4px; overflow:hidden; line-height:0; }
+/* The camera image is video, so its letterbox and overlay stay dark in both themes. */
+.cam-container { position:relative; background:var(--bs-black); border-radius:var(--bs-border-radius); overflow:hidden; line-height:0; }
 .cam-controls  { position:absolute; bottom:0; left:0; right:0; line-height:1;
-                 background:linear-gradient(transparent, rgba(0,0,0,0.85));
+                 background:linear-gradient(transparent, rgba(var(--bs-black-rgb), .85));
                  padding:28px 10px 10px;
                  display:flex; align-items:center; gap:8px; flex-wrap:wrap; }
-.pc-stream     { border-radius:4px; width:100%; display:block; }
+.cam-info      { font-size:11px; color:rgba(var(--bs-white-rgb), .8); margin-right:auto; font-family:monospace; }
+.pc-stream     { border-radius:var(--bs-border-radius); width:100%; display:block; }
 
-#wf-canvas { display:block; width:100%; cursor:crosshair; border-radius:4px; background:var(--dark); }
+#wf-canvas { display:block; width:100%; cursor:crosshair; border-radius:var(--bs-border-radius); background:var(--dark); }
 #wf-canvas.no-session { cursor:default; }
 .wf-filter { display:flex; align-items:center; gap:6px; flex-wrap:wrap; margin-bottom:10px; }
 .wf-filter label { color:var(--fg); font-size:12px; cursor:pointer; display:flex; align-items:center; gap:4px; }
-.wf-filter input[type=radio] { accent-color:var(--cyan); cursor:pointer; }
+.wf-filter input[type=radio] { accent-color:var(--bs-primary); cursor:pointer; }
 #wf-custom-checks { display:none; padding:6px 0 2px; flex-wrap:wrap; gap:4px 10px; }
 #wf-custom-checks label { color:var(--muted); font-size:11px; cursor:pointer; display:flex; align-items:center; gap:3px; }
-#wf-custom-checks input { accent-color:var(--cyan); cursor:pointer; }
+#wf-custom-checks input { accent-color:var(--bs-primary); cursor:pointer; }
 #wf-msg { color:var(--muted); font-size:12px; text-align:center; padding:20px 0; display:none; }
 
-.fps-seg { display:inline-flex; border-radius:5px; overflow:hidden; border:1px solid var(--cyan); }
+.fps-seg { display:inline-flex; border-radius:var(--bs-border-radius); overflow:hidden; border:1px solid var(--bs-primary); }
 .fps-seg input[type=radio] { display:none; }
 .fps-seg label { padding:5px 14px; font-size:12px; cursor:pointer; color:var(--muted);
-                 background:var(--dark); border-right:1px solid var(--cyan); white-space:nowrap; }
+                 background:var(--accent); border-right:1px solid var(--bs-primary); white-space:nowrap; }
 .fps-seg label:last-of-type { border-right:none; }
-.fps-seg input[type=radio]:checked + label { background:var(--cyan); color:#000; font-weight:bold; }
+.fps-seg input[type=radio]:checked + label { background:var(--bs-primary); color:var(--bs-white); font-weight:bold; }
 
 .jm-table  { width:100%; border-collapse:collapse; font-size:12px; }
 .jm-table th { color:var(--muted); text-align:left; padding:5px 8px;
-               border-bottom:1px solid #2a2a4a; font-weight:normal; font-size:11px; }
-.jm-table td { padding:4px 8px; border-bottom:1px solid var(--dark); vertical-align:middle; }
+               border-bottom:1px solid var(--div); font-weight:normal; font-size:11px; }
+.jm-table td { padding:4px 8px; border-bottom:1px solid var(--div); vertical-align:middle; }
 .jm-table.jm-simple .jm-col-adv { display:none; }
 .jm-grp-hdr { cursor:pointer; user-select:none; }
-.jm-grp-hdr .jm-grp-arrow { display:inline-block; width:10px; }
+.jm-grp-hdr .jm-grp-arrow { display:inline-block; width:.7rem; }
 .jm-table tr.jm-row-collapsed { display:none; }
-.jm-bar-bg { flex:1; height:6px; background:var(--dark); border-radius:3px; overflow:hidden; min-width:50px; max-width:90px; }
-.jm-bar    { height:100%; background:var(--cyan); border-radius:3px; transition:width .1s; }
-.jm-val    { color:var(--cyan); font-family:monospace; font-size:10px; width:38px; text-align:right; flex-shrink:0; }
-.jm-sel    { background:var(--accent); color:var(--fg); border:1px solid var(--cyan);
-             border-radius:4px; padding:3px 6px; font-size:11px; max-width:170px; }
-.jm-scale-in  { background:var(--accent); color:var(--fg); border:1px solid #555;
-                border-radius:4px; padding:3px 6px; font-size:11px; width:54px; text-align:center; }
-.jm-model-in  { background:var(--accent); color:var(--fg); border:1px solid #555;
-                border-radius:4px; padding:3px 6px; font-size:11px; width:130px; }
+.jm-face   { color:var(--cyan); }
+.jm-body   { color:var(--amber); }
+.jm-bar-bg { flex:1; height:6px; background:var(--dark); border-radius:3px; overflow:hidden; min-width:3rem; max-width:6rem; }
+.jm-bar    { height:100%; background:var(--bs-info); border-radius:3px; transition:width .1s; }
+.jm-val    { color:var(--cyan); font-family:monospace; font-size:10px; width:2.5rem; text-align:right; flex-shrink:0; }
+.jm-sel,
+.jm-scale-in,
+.jm-model-in { background:var(--accent); color:var(--fg); border:1px solid var(--div);
+               border-radius:var(--bs-border-radius); padding:3px 6px; font-size:11px; max-width:100%; }
+.jm-sel       { max-width:11rem; }
+.jm-scale-in  { width:3.5rem; text-align:center; }
+.jm-model-in  { width:8.5rem; }
 
 .pc-msg  { font-size:11px; min-height:16px; }
-.pc-hint { color:#555; font-size:11px; line-height:1.5; margin:0 0 8px; }
+.pc-hint { color:var(--faint); font-size:11px; line-height:1.5; margin:0 0 8px; }
+.pc-sep  { color:var(--div); margin:0 2px; }
 
 /* ── Tabs — styled to match FPP's Plugin Manager (Bootstrap .nav-tabs) ─────────
    FPP's plugins.php rounds the top corners of its tabs to 12px and thickens the
@@ -138,34 +134,42 @@ $step_time_ms = intval($cfg['step_time_ms'] ?? 50);
                          text-transform:uppercase; letter-spacing:0.8px;
                          font-size:12px; font-weight:bold; }
 #pc-maintabs .pc-sn                 { font-size:9px; }
-#pc-maintabs .nav-link.done .pc-sn  { background:var(--bs-success, #198754) !important; }
+#pc-maintabs .nav-link.done .pc-sn  { background:var(--bs-success) !important; }
 .pc-tabpanel   { display:none; }
 .pc-tabpanel.active { display:block; }
+
+/* ── Responsive rows: side by side on wide screens, stacked on phones ────────── */
+.pc-row        { display:flex; gap:14px; align-items:flex-start; flex-wrap:wrap; }
+.pc-row > *    { min-width:0; }
+.pc-preview    { flex:0 1 14rem; max-width:100%; }
+.pc-grow       { flex:1 1 18rem; }
+.pc-cam-col    { flex:2 1 20rem; }
+.pc-side-col   { flex:1 1 17rem; max-width:100%; }
+.pc-settings-grid { display:grid; grid-template-columns:repeat(auto-fit, minmax(14rem, 1fr));
+                    gap:12px 32px; max-width:40rem; margin-top:12px; }
 
 /* ── Live output toggle card ────────────────────────────────────────────────── */
 .live-toggle-card { display:flex; align-items:center; justify-content:space-between;
                     gap:16px; flex-wrap:wrap; }
-.live-toggle-card .live-desc { flex:1; min-width:200px; }
-.live-toggle-card .live-desc p { color:#555; font-size:11px; line-height:1.5; margin:4px 0 0; }
-.btn-live-main { padding:12px 28px; font-size:14px; }
+.live-toggle-card .live-desc { flex:1; min-width:min(100%, 12rem); }
+.live-toggle-card .live-desc p { color:var(--faint); font-size:11px; line-height:1.5; margin:4px 0 0; }
 
 .exp-panel      { display:none; }
 .exp-panel.active { display:block; }
+.pc-inset       { background:var(--dark); border-radius:var(--bs-border-radius); border:1px solid var(--div); }
 
 /* ── Per-channel curve editor (modal) ───────────────────────────────────────── */
-.ce-overlay { display:none; position:fixed; inset:0; background:rgba(0,0,0,.6);
-              z-index:50; align-items:center; justify-content:center; }
-.ce-modal   { background:var(--panel); border-radius:8px; padding:18px;
-              width:90vw; max-width:1200px; height:78vh; display:flex; flex-direction:column; }
+.ce-overlay { display:none; position:fixed; inset:0; background:rgba(var(--bs-black-rgb), .6);
+              z-index:1055; align-items:center; justify-content:center; }
+.ce-modal   { background:var(--bs-body-bg); color:var(--fg); border:1px solid var(--div);
+              border-radius:var(--bs-border-radius-lg); padding:18px;
+              width:95vw; max-width:1200px; height:85vh; display:flex; flex-direction:column; }
 .ce-hdr     { display:flex; align-items:center; justify-content:space-between; margin-bottom:10px; }
-.ce-hdr h3  { margin:0; }
-.ce-close   { background:none; border:none; color:var(--muted); font-size:20px; cursor:pointer; line-height:1; }
-.ce-close:hover { color:var(--fg); }
+.ce-hdr h3  { margin:0; color:var(--magenta); }
 .ce-toolbar { display:flex; align-items:center; gap:6px; flex-wrap:wrap; margin-bottom:8px; }
-.ce-tool-btn.active { background:var(--cyan); color:#000; border-color:var(--cyan); }
 .ce-locked-note { color:var(--amber); font-size:11px; }
 #ce-canvas  { display:block; width:100%; flex:1; min-height:0; cursor:crosshair;
-              border-radius:4px; background:var(--dark); }
+              border-radius:var(--bs-border-radius); background:var(--dark); }
 .ce-transport { display:flex; gap:5px; align-items:center; flex-wrap:wrap; margin-top:8px; }
 </style>
 
@@ -199,10 +203,10 @@ $step_time_ms = intval($cfg['step_time_ms'] ?? 50);
 
 <!-- Live Output control ─────────────────────────────────────────────────── -->
 <div class="pc-card">
-  <div style="display:flex; gap:14px; align-items:flex-start;">
+  <div class="pc-row">
 
     <!-- Small camera preview -->
-    <div style="width:220px; flex-shrink:0;">
+    <div class="pc-preview">
       <div class="cam-container" style="border-radius:6px;">
         <img id="map-test-stream" src="/fpp-capture-api/stream" class="pc-stream"
              onerror="this.style.display='none'" alt="">
@@ -210,7 +214,7 @@ $step_time_ms = intval($cfg['step_time_ms'] ?? 50);
     </div>
 
     <!-- Live Output toggle + values -->
-    <div style="flex:1; min-width:0;">
+    <div class="pc-grow">
       <h3>Test Servos Live</h3>
       <div class="live-toggle-card">
         <div class="live-desc">
@@ -220,7 +224,7 @@ $step_time_ms = intval($cfg['step_time_ms'] ?? 50);
           </p>
         </div>
         <button id="btn-live"
-                class="pc-btn btn-live-main <?= ($cfg['live_output'] ?? false) ? 'btn-live-on' : 'btn-live-off' ?>"
+                class="btn btn-live-main <?= ($cfg['live_output'] ?? false) ? 'btn-success btn-live-on' : 'btn-outline-secondary btn-live-off' ?>"
                 onclick="toggleLive()">
           <?= ($cfg['live_output'] ?? false) ? '⏹ Stop Live Test' : '▶ Start Live Test' ?>
         </button>
@@ -263,19 +267,20 @@ $step_time_ms = intval($cfg['step_time_ms'] ?? 50);
 
 <!-- Joint Mapping ───────────────────────────────────────────────────────── -->
 <div class="pc-card">
-  <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:6px;">
+  <div style="display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:8px; margin-bottom:6px;">
     <h3 style="margin:0;">Joint → Servo Mapping</h3>
-    <div style="display:flex; gap:8px; align-items:center;">
-      <button class="pc-btn btn-ghost btn-sm" id="btn-jm-advanced" onclick="toggleJmAdvanced()">⚙ Show advanced</button>
-      <button class="pc-btn btn-ghost btn-sm" onclick="testServoOutput()" title="Send center values to all configured servo ports">▶ Test Servos</button>
+    <div style="display:flex; gap:8px; align-items:center; flex-wrap:wrap;">
+      <button class="btn btn-outline-primary btn-sm" id="btn-jm-advanced" onclick="toggleJmAdvanced()">⚙ Show advanced</button>
+      <button class="btn btn-outline-primary btn-sm" onclick="testServoOutput()" title="Send center values to all configured servo ports">▶ Test Servos</button>
       <span id="jm-test-msg" class="pc-msg" style="margin:0;"></span>
-      <button class="pc-btn btn-ghost btn-sm" onclick="saveJointMap()">Save Mapping</button>
+      <button class="btn btn-outline-primary btn-sm" onclick="saveJointMap()">Save Mapping</button>
     </div>
   </div>
   <p class="pc-hint">
     Assign each tracked joint to a servo port.
     Min / max / center calibration is read from the Servo Calibrator plugin.
   </p>
+  <div class="table-responsive">
   <table class="jm-table jm-simple" id="jm-table">
     <thead>
       <tr>
@@ -286,11 +291,12 @@ $step_time_ms = intval($cfg['step_time_ms'] ?? 50);
       </tr>
     </thead>
     <tbody id="jm-tbody">
-      <tr><td colspan="6" style="color:#555; font-style:italic; padding:12px 8px;">
+      <tr><td colspan="6" style="color:var(--faint); font-style:italic; padding:12px 8px;">
         Loading servo ports…
       </td></tr>
     </tbody>
   </table>
+  </div>
   <div id="jm-msg" class="pc-msg" style="color:var(--green); margin-top:6px;"></div>
 </div>
 
@@ -298,36 +304,36 @@ $step_time_ms = intval($cfg['step_time_ms'] ?? 50);
 <div class="pc-card">
   <details>
     <summary style="cursor:pointer;"><h3 style="display:inline; margin:0;">Smoothing (advanced)</h3></summary>
-    <div style="display:grid; grid-template-columns:1fr 1fr; gap:12px 32px; max-width:600px; margin-top:12px;">
+    <div class="pc-settings-grid">
       <div>
         <div style="color:var(--muted); font-size:11px; margin-bottom:4px;">
           Tracking Smoothness
-          <span style="color:#444; font-size:10px; margin-left:4px;">higher = calmer motion, but slower to follow you</span>
+          <span style="color:var(--faint); font-size:10px; margin-left:4px;">higher = calmer motion, but slower to follow you</span>
         </div>
         <div style="display:flex; align-items:center; gap:8px;">
           <input type="range" id="sl-smoothing" style="flex:1; accent-color:var(--cyan);"
                  min="0.05" max="0.9" step="0.05"
                  value="<?= number_format($cfg['smoothing'] ?? 0.15, 2) ?>"
                  oninput="document.getElementById('lbl-smoothing').textContent=parseFloat(this.value).toFixed(2)">
-          <span id="lbl-smoothing" class="pc-value" style="width:30px; font-size:12px;"><?= number_format($cfg['smoothing'] ?? 0.15, 2) ?></span>
+          <span id="lbl-smoothing" class="pc-value" style="width:2.5rem; font-size:12px;"><?= number_format($cfg['smoothing'] ?? 0.15, 2) ?></span>
         </div>
       </div>
       <div>
         <div style="color:var(--muted); font-size:11px; margin-bottom:4px;">
           Servo Motion Damping
-          <span style="color:#444; font-size:10px; margin-left:4px;">higher = gentler servo movement, less mechanical jitter</span>
+          <span style="color:var(--faint); font-size:10px; margin-left:4px;">higher = gentler servo movement, less mechanical jitter</span>
         </div>
         <div style="display:flex; align-items:center; gap:8px;">
           <input type="range" id="sl-servo" style="flex:1; accent-color:var(--cyan);"
                  min="0.05" max="0.9" step="0.05"
                  value="<?= number_format($cfg['servo_smoothing'] ?? 0.25, 2) ?>"
                  oninput="document.getElementById('lbl-servo').textContent=parseFloat(this.value).toFixed(2)">
-          <span id="lbl-servo" class="pc-value" style="width:30px; font-size:12px;"><?= number_format($cfg['servo_smoothing'] ?? 0.25, 2) ?></span>
+          <span id="lbl-servo" class="pc-value" style="width:2.5rem; font-size:12px;"><?= number_format($cfg['servo_smoothing'] ?? 0.25, 2) ?></span>
         </div>
       </div>
     </div>
     <div style="margin-top:10px; display:flex; align-items:center; gap:10px;">
-      <button class="pc-btn btn-ghost btn-sm" onclick="saveSmoothing()">Save Settings</button>
+      <button class="btn btn-outline-primary btn-sm" onclick="saveSmoothing()">Save Settings</button>
       <span id="settings-msg" class="pc-msg" style="margin:0;"></span>
     </div>
   </details>
@@ -347,46 +353,46 @@ $step_time_ms = intval($cfg['step_time_ms'] ?? 50);
   <div style="display:flex; gap:8px; align-items:center; flex-wrap:wrap;">
     <span style="color:var(--green); font-size:12px;">✓ Recording captured</span>
     <span id="post-rec-info" style="color:var(--muted); font-size:12px; font-family:monospace;"></span>
-    <input class="pc-input" id="sess-save-name-inline" style="flex:1; min-width:120px; font-size:11px;">
-    <button class="pc-btn btn-play btn-sm" onclick="sessSaveAndReview()">Save &amp; Review</button>
-    <button class="pc-btn btn-ghost btn-sm" onclick="skipPostRecordSave()">Skip, just review</button>
+    <input class="pc-input" id="sess-save-name-inline" style="flex:1; min-width:8rem; font-size:11px;">
+    <button class="btn btn-success btn-sm" onclick="sessSaveAndReview()">Save &amp; Review</button>
+    <button class="btn btn-outline-primary btn-sm" onclick="skipPostRecordSave()">Skip, just review</button>
   </div>
 </div>
 
 <!-- Camera + Session & Audio ────────────────────────────────────────────── -->
-<div style="display:flex; gap:14px; align-items:flex-start;">
+<div class="pc-row">
 
   <!-- Camera feed -->
-  <div class="pc-card" style="flex:2; min-width:0; padding:0; overflow:hidden;">
+  <div class="pc-card pc-cam-col" style="padding:0; overflow:hidden;">
     <div class="cam-container">
       <img id="rec-stream" class="pc-stream"
            onerror="this.style.display='none'" alt="">
       <div style="position:absolute; top:10px; left:10px; display:flex; gap:6px;">
-        <span class="pc-badge <?= $recording ? 'badge-rec' : 'badge-idle' ?>" id="badge-rec">
+        <span class="badge <?= $recording ? 'text-bg-danger badge-rec' : 'text-bg-secondary' ?>" id="badge-rec">
           <?= $recording ? '● REC' : 'IDLE' ?>
         </span>
-        <span class="pc-badge badge-idle" id="cam-status-badge" style="display:none;"></span>
+        <span class="badge text-bg-secondary" id="cam-status-badge" style="display:none;"></span>
       </div>
       <div class="cam-controls">
-        <span id="rec-info" style="font-size:11px; color:#ccc; margin-right:auto; font-family:monospace;">
+        <span id="rec-info" class="cam-info">
           <?= $dur ?> &nbsp;·&nbsp; <?= $fc ?> frames
         </span>
-        <button class="pc-btn btn-rec"  id="btn-rec"  onclick="recStart()" <?= $recording ? 'style="display:none"' : '' ?>>● Record</button>
-        <button class="pc-btn btn-stop" id="btn-srec" onclick="recStop()"  <?= $recording ? '' : 'style="display:none"' ?>>■ Stop</button>
+        <button class="btn btn-danger"  id="btn-rec"  onclick="recStart()" <?= $recording ? 'style="display:none"' : '' ?>>● Record</button>
+        <button class="btn btn-secondary" id="btn-srec" onclick="recStop()"  <?= $recording ? '' : 'style="display:none"' ?>>■ Stop</button>
       </div>
     </div>
     <!-- Manual fallback — only shown after automatic reconnect attempts are exhausted -->
     <div id="cam-recovery-bar" style="display:none; padding:8px 10px; background:var(--dark);
-         border-top:1px solid #2a2a4a; gap:8px; align-items:center; flex-wrap:wrap;">
+         border-top:1px solid var(--div); gap:8px; align-items:center; flex-wrap:wrap;">
       <span id="cam-recovery-text" style="color:var(--amber); font-size:11px;">Camera still busy (held by Live Follow)</span>
-      <button class="pc-btn btn-play  btn-sm" onclick="claimCamera()">Try Again</button>
-      <button class="pc-btn btn-ghost btn-sm" id="cam-restore-lf" onclick="restoreLiveFollow()">Use Live Follow Instead</button>
+      <button class="btn btn-success  btn-sm" onclick="claimCamera()">Try Again</button>
+      <button class="btn btn-outline-primary btn-sm" id="cam-restore-lf" onclick="restoreLiveFollow()">Use Live Follow Instead</button>
       <span id="cam-claim-msg" class="pc-msg" style="margin:0;"></span>
     </div>
   </div>
 
   <!-- Session & Audio panel -->
-  <div class="pc-card" style="width:290px; flex-shrink:0;">
+  <div class="pc-card pc-side-col">
 
     <div class="rp-section" style="padding-top:0;">
       <div class="rp-hdr">Open Saved Recording</div>
@@ -396,9 +402,9 @@ $step_time_ms = intval($cfg['step_time_ms'] ?? 50);
             <option><?= htmlspecialchars($s) ?></option>
           <?php endforeach; ?>
         </select>
-        <button class="pc-btn btn-ghost btn-sm" onclick="sessLoad()">Load</button>
-        <button class="pc-btn btn-halt  btn-sm" onclick="sessDelete()">Del</button>
-        <button class="pc-btn btn-muted btn-sm" onclick="refreshSessions()" title="Refresh">↻</button>
+        <button class="btn btn-outline-primary btn-sm" onclick="sessLoad()">Load</button>
+        <button class="btn btn-danger  btn-sm" onclick="sessDelete()">Del</button>
+        <button class="btn btn-outline-secondary btn-sm" onclick="refreshSessions()" title="Refresh">↻</button>
       </div>
     </div>
 
@@ -408,7 +414,7 @@ $step_time_ms = intval($cfg['step_time_ms'] ?? 50);
         <select class="pc-select" id="audio-sel" style="flex:1; min-width:0; font-size:11px;" onchange="setAudioFile(this.value)">
           <option value="">— none —</option>
         </select>
-        <button class="pc-btn btn-muted btn-sm" onclick="loadMediaFiles()" title="Refresh">↻</button>
+        <button class="btn btn-outline-secondary btn-sm" onclick="loadMediaFiles()" title="Refresh">↻</button>
       </div>
     </div>
 
@@ -418,8 +424,8 @@ $step_time_ms = intval($cfg['step_time_ms'] ?? 50);
         <select class="pc-select" id="audio-out-sel" style="flex:1; min-width:0; font-size:11px;" onchange="setAudioOutput(this.value)">
           <option value="browser">Browser (your computer speakers)</option>
         </select>
-        <button class="pc-btn btn-ghost btn-sm" onclick="testAudio()">Test</button>
-        <button class="pc-btn btn-muted btn-sm" onclick="loadAudioDevices()" title="Refresh">↻</button>
+        <button class="btn btn-outline-primary btn-sm" onclick="testAudio()">Test</button>
+        <button class="btn btn-outline-secondary btn-sm" onclick="loadAudioDevices()" title="Refresh">↻</button>
       </div>
       <span id="audio-msg" class="pc-msg" style="display:block; margin-top:3px;"></span>
     </div>
@@ -443,7 +449,7 @@ $step_time_ms = intval($cfg['step_time_ms'] ?? 50);
 <div id="servo-warn" class="pc-card" style="display:none; border:1px solid var(--amber); padding:10px 18px; margin-bottom:14px;">
   <div style="display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:10px;">
     <div id="servo-warn-text" style="color:var(--amber); font-size:12px; flex:1;"></div>
-    <button class="pc-btn btn-ghost btn-sm" onclick="testServoOutput()">▶ Test Servo Output</button>
+    <button class="btn btn-outline-primary btn-sm" onclick="testServoOutput()">▶ Test Servo Output</button>
   </div>
   <div id="servo-test-msg" class="pc-msg" style="margin-top:4px;"></div>
 </div>
@@ -456,7 +462,7 @@ $step_time_ms = intval($cfg['step_time_ms'] ?? 50);
       &nbsp;·&nbsp; <span id="sess-frames" style="color:var(--muted);"><?= $fc ?> frames</span>
       &nbsp;·&nbsp; <span id="sess-dur" style="color:var(--muted);"><?= $dur ?></span>
     <?php else: ?>
-      <span style="color:#444;">No session loaded — record in the Record tab or load a saved session.</span>
+      <span style="color:var(--faint);">No session loaded — record in the Record tab or load a saved session.</span>
     <?php endif; ?>
   </div>
 </div>
@@ -473,9 +479,9 @@ $step_time_ms = intval($cfg['step_time_ms'] ?? 50);
   </div>
 
   <div style="display:flex; gap:6px; align-items:center; flex-wrap:wrap; margin-bottom:8px;">
-    <button class="pc-btn btn-ghost btn-sm" id="btn-edit-mode" onclick="toggleEditMode()">✎ Draw</button>
+    <button class="btn btn-outline-primary btn-sm" id="btn-edit-mode" onclick="toggleEditMode()">✎ Draw</button>
     <span id="lock-status" style="color:var(--amber); font-size:11px;"></span>
-    <span style="color:#444; font-size:11px; margin-left:auto;">Click a channel name for a larger editor</span>
+    <span style="color:var(--faint); font-size:11px; margin-left:auto;">Click a channel name for a larger editor</span>
   </div>
 
   <input type="range" class="pc-scrub" id="scrub-slider"
@@ -483,21 +489,21 @@ $step_time_ms = intval($cfg['step_time_ms'] ?? 50);
          <?= ($fc > 0) ? '' : 'disabled' ?>
          oninput="onScrub(this.value)">
   <div style="display:flex; justify-content:space-between; font-size:10px;
-              color:#444; margin-bottom:8px; font-family:monospace;">
+              color:var(--faint); margin-bottom:8px; font-family:monospace;">
     <span id="scrub-pos">00:00.0</span>
     <span id="scrub-dur"><?= $dur ?></span>
   </div>
 
   <div style="display:flex; gap:5px; align-items:center; flex-wrap:wrap; margin-bottom:10px;">
-    <button class="pc-btn btn-play  btn-sm" onclick="tlPlay()">▶ Play</button>
-    <button class="pc-btn btn-pause btn-sm" onclick="tlPause()">⏸ Pause</button>
-    <button class="pc-btn btn-halt  btn-sm" onclick="tlStop()">■ Stop</button>
-    <button class="pc-btn btn-ghost btn-sm" onclick="tlRestart()">⏮ Restart</button>
-    <button class="pc-btn btn-ghost btn-sm" id="btn-tl-half" onclick="tlToggleSpeed()">½×</button>
-    <button class="pc-btn btn-ghost btn-sm" id="btn-tl-loop" onclick="tlToggleLoop()">↻ Loop</button>
-    <span style="color:#2a2a4a; margin:0 2px;">|</span>
-    <button class="pc-btn btn-muted btn-sm" id="btn-undo" onclick="undoLastEdit()" disabled>↩ Undo</button>
-    <button class="pc-btn btn-rec   btn-sm" onclick="rerecordStart()">⏺ Re-record</button>
+    <button class="btn btn-success  btn-sm" onclick="tlPlay()">▶ Play</button>
+    <button class="btn btn-warning btn-sm" onclick="tlPause()">⏸ Pause</button>
+    <button class="btn btn-danger  btn-sm" onclick="tlStop()">■ Stop</button>
+    <button class="btn btn-outline-primary btn-sm" onclick="tlRestart()">⏮ Restart</button>
+    <button class="btn btn-outline-primary btn-sm" id="btn-tl-half" onclick="tlToggleSpeed()">½×</button>
+    <button class="btn btn-outline-primary btn-sm" id="btn-tl-loop" onclick="tlToggleLoop()">↻ Loop</button>
+    <span class="pc-sep">|</span>
+    <button class="btn btn-outline-secondary btn-sm" id="btn-undo" onclick="undoLastEdit()" disabled>↩ Undo</button>
+    <button class="btn btn-danger   btn-sm" onclick="rerecordStart()">⏺ Re-record</button>
     <span id="tl-status" style="color:var(--muted); font-size:11px; font-family:monospace; margin-left:4px;"></span>
   </div>
 
@@ -523,10 +529,10 @@ $step_time_ms = intval($cfg['step_time_ms'] ?? 50);
       <label for="fps-cust">Custom</label>
     </div>
     <input type="number" id="fps-custom-val" class="pc-input"
-           value="<?= $step_time_ms ?>" min="10" max="500" style="width:65px;"
-           <?= ($step_time_ms != 50 && $step_time_ms != 25) ? '' : 'style="display:none"' ?>
+           value="<?= $step_time_ms ?>" min="10" max="500"
+           style="width:4.5rem;<?= ($step_time_ms != 50 && $step_time_ms != 25) ? '' : ' display:none;' ?>"
            oninput="onCustomFpsInput()">
-    <span id="fps-label" style="color:#555; font-size:11px;"></span>
+    <span id="fps-label" style="color:var(--faint); font-size:11px;"></span>
   </div>
 
   <!-- Export type tabs -->
@@ -547,12 +553,11 @@ $step_time_ms = intval($cfg['step_time_ms'] ?? 50);
     </p>
     <div class="pc-field">
       <span class="pc-label">Filename</span>
-      <input class="pc-input" id="fseq-name" value="capture" style="width:180px;" placeholder="no extension" oninput="this.dataset.dirty='1'">
-      <button class="pc-btn btn-export" onclick="exportFseq()">Export FSEQ for FPP</button>
+      <input class="pc-input" id="fseq-name" value="capture" style="width:12rem;" placeholder="no extension" oninput="this.dataset.dirty='1'">
+      <button class="btn btn-primary" onclick="exportFseq()">Export FSEQ for FPP</button>
     </div>
     <div id="fseq-msg" class="pc-msg"></div>
-    <div id="fseq-ch-map" style="display:none; margin-top:10px; padding:10px;
-         background:var(--dark); border-radius:5px; border:1px solid #1a2a4a;">
+    <div id="fseq-ch-map" class="pc-inset" style="display:none; margin-top:10px; padding:10px;">
       <div style="color:var(--cyan); font-weight:bold; font-size:11px; margin-bottom:6px;">FPP Channel Mapping</div>
       <div id="fseq-ch-map-inner" style="font-size:11px; font-family:monospace;"></div>
     </div>
@@ -568,8 +573,8 @@ $step_time_ms = intval($cfg['step_time_ms'] ?? 50);
     </p>
     <div class="pc-field">
       <span class="pc-label">Filename</span>
-      <input class="pc-input" id="xsq-name" value="capture" style="width:180px;" placeholder="no extension" oninput="this.dataset.dirty='1'">
-      <button class="pc-btn btn-ghost" onclick="exportXlights()">Export XSQ for xLights</button>
+      <input class="pc-input" id="xsq-name" value="capture" style="width:12rem;" placeholder="no extension" oninput="this.dataset.dirty='1'">
+      <button class="btn btn-outline-primary" onclick="exportXlights()">Export XSQ for xLights</button>
     </div>
     <div id="xsq-msg" class="pc-msg"></div>
     <div id="xsq-downloads" style="display:none; gap:8px; flex-wrap:wrap; margin-top:8px;"></div>
@@ -583,28 +588,28 @@ $step_time_ms = intval($cfg['step_time_ms'] ?? 50);
   <div class="ce-modal">
     <div class="ce-hdr">
       <h3 id="ce-title">Channel</h3>
-      <button class="ce-close" onclick="closeChannelEditor()">×</button>
+      <button type="button" class="btn-close" aria-label="Close" onclick="closeChannelEditor()"></button>
     </div>
     <div class="ce-toolbar" id="ce-toolbar">
-      <button class="pc-btn btn-ghost btn-sm ce-tool-btn" id="ce-tool-draw"    onclick="ceSetTool('draw')">✎ Draw</button>
-      <button class="pc-btn btn-ghost btn-sm ce-tool-btn" id="ce-tool-point"   onclick="ceSetTool('point')">● Add Point</button>
-      <button class="pc-btn btn-ghost btn-sm ce-tool-btn" id="ce-tool-scissors" onclick="ceSetTool('scissors')">✂ Scissors</button>
-      <span style="color:#2a2a4a; margin:0 2px;">|</span>
-      <button class="pc-btn btn-play btn-sm" id="ce-btn-apply" onclick="ceApplyPoints()" disabled>Apply Points</button>
-      <button class="pc-btn btn-ghost btn-sm" id="ce-btn-cancel" onclick="ceCancelPoints()" disabled>Cancel</button>
-      <button class="pc-btn btn-ghost btn-sm ce-tool-btn active" id="ce-btn-show-points" onclick="ceToggleShowPoints()" title="Show or hide the staged point markers">👁 Show Points</button>
-      <span style="color:#2a2a4a; margin:0 2px;">|</span>
+      <button class="btn btn-outline-primary btn-sm ce-tool-btn" id="ce-tool-draw"    onclick="ceSetTool('draw')">✎ Draw</button>
+      <button class="btn btn-outline-primary btn-sm ce-tool-btn" id="ce-tool-point"   onclick="ceSetTool('point')">● Add Point</button>
+      <button class="btn btn-outline-primary btn-sm ce-tool-btn" id="ce-tool-scissors" onclick="ceSetTool('scissors')">✂ Scissors</button>
+      <span class="pc-sep">|</span>
+      <button class="btn btn-success btn-sm" id="ce-btn-apply" onclick="ceApplyPoints()" disabled>Apply Points</button>
+      <button class="btn btn-outline-primary btn-sm" id="ce-btn-cancel" onclick="ceCancelPoints()" disabled>Cancel</button>
+      <button class="btn btn-outline-primary btn-sm ce-tool-btn active" id="ce-btn-show-points" onclick="ceToggleShowPoints()" title="Show or hide the staged point markers">👁 Show Points</button>
+      <span class="pc-sep">|</span>
       <span style="color:var(--muted); font-size:11px;">Smooth window</span>
-      <input type="number" class="pc-input" id="ce-smooth-window" value="5" min="2" max="60" style="width:55px;">
-      <button class="pc-btn btn-ghost btn-sm" id="ce-btn-smooth" onclick="ceSmooth()">〜 Smooth</button>
+      <input type="number" class="pc-input" id="ce-smooth-window" value="5" min="2" max="60" style="width:4rem;">
+      <button class="btn btn-outline-primary btn-sm" id="ce-btn-smooth" onclick="ceSmooth()">〜 Smooth</button>
       <span id="ce-locked-note" class="ce-locked-note" style="display:none;">🔒 Channel is locked — unlock it in the timeline to edit</span>
       <span id="ce-msg" class="pc-msg" style="margin-left:auto;"></span>
     </div>
     <canvas id="ce-canvas"></canvas>
     <div class="ce-transport">
-      <button class="pc-btn btn-play  btn-sm" onclick="tlPlay()">▶ Play</button>
-      <button class="pc-btn btn-pause btn-sm" onclick="tlPause()">⏸ Pause</button>
-      <button class="pc-btn btn-halt  btn-sm" onclick="tlStop()">■ Stop</button>
+      <button class="btn btn-success  btn-sm" onclick="tlPlay()">▶ Play</button>
+      <button class="btn btn-warning btn-sm" onclick="tlPause()">⏸ Pause</button>
+      <button class="btn btn-danger  btn-sm" onclick="tlStop()">■ Stop</button>
       <input type="range" class="pc-scrub" id="ce-scrub-slider" style="flex:1;" min="0" max="1" value="0" oninput="onScrub(this.value)">
     </div>
   </div>
@@ -690,13 +695,40 @@ function updateStepper(s) {
   set('tab-btn-review',   exportDone);
 }
 
+// ── Theme colours for the canvases ────────────────────────────────────────────
+// A canvas can't use CSS variables, so read the current FPP theme's Bootstrap
+// colours at draw time. Cached briefly because draw() runs on every scrub.
+let _themeCache = null, _themeCacheAt = 0;
+function themeColors() {
+  const now = performance.now();
+  if (_themeCache && now - _themeCacheAt < 500) return _themeCache;
+  const cs = getComputedStyle(document.querySelector('.pc-wrap') || document.body);
+  const v  = n => cs.getPropertyValue(n).trim();
+  _themeCacheAt = now;
+  return _themeCache = {
+    bg:     v('--bs-secondary-bg'),   bgAlt: v('--bs-tertiary-bg'),  ruler: v('--bs-body-bg'),
+    grid:   v('--bs-border-color'),   text:  v('--bs-secondary-color'),
+    faint:  v('--bs-tertiary-color'), strong: v('--bs-emphasis-color'),
+    face:   v('--bs-info-text-emphasis'), body: v('--bs-warning-text-emphasis'),
+    head:   v('--bs-danger'),
+    rgba:   (name, a) => `rgba(${v('--bs-' + name + '-rgb')}, ${a})`,
+  };
+}
+// FPP's theme toggle changes data-bs-theme without a reload; redraw to match.
+new MutationObserver(() => {
+  _themeCache = null;
+  if (typeof WF !== 'undefined') { WF.buildCustomChecks(); WF.draw(); }
+  if (typeof CE !== 'undefined' && document.getElementById('ce-overlay').style.display === 'flex') ceDraw();
+}).observe(document.documentElement, { attributes: true, attributeFilter: ['data-bs-theme'] });
+
 // ── Waveform ──────────────────────────────────────────────────────────────────
 const WF = {
   data: null, filter: 'all',
   checked: Object.fromEntries(JOINTS.map(j => [j.key, true])),
   cursor: 0, dragging: false,
   LOCK_W:22, LABEL_W:110, VAL_W:50, ROW_H:28, RULER_H:18, PAD:4,
-  FACE_COL:'#4cc9f0', BODY_COL:'#fb8500',
+  get FACE_COL() { return themeColors().face; },
+  get BODY_COL() { return themeColors().body; },
   editMode: false, _drawing: false, _drawChannel: null, _drawEdits: [], _drawSnapshot: null,
 
   visible() {
@@ -751,10 +783,11 @@ const WF = {
     ctx.scale(dpr, dpr);
     const waveX = this.LOCK_W + this.LABEL_W;
     const waveW = Math.max(cssW - waveX - this.VAL_W, 1);
+    const C = themeColors();
 
     if (!this.data || this.data.total_frames === 0 || nRows === 0) {
-      ctx.fillStyle = '#0d0d1f'; ctx.fillRect(0, 0, cssW, cssH);
-      ctx.fillStyle = '#555'; ctx.font = '12px sans-serif'; ctx.textAlign = 'center';
+      ctx.fillStyle = C.bg; ctx.fillRect(0, 0, cssW, cssH);
+      ctx.fillStyle = C.faint; ctx.font = '12px sans-serif'; ctx.textAlign = 'center';
       ctx.fillText(nRows === 0 ? 'No channels selected' : 'No session loaded', cssW/2, cssH/2 + 4);
       return;
     }
@@ -762,16 +795,16 @@ const WF = {
     const n = this.data.timestamps.length;
     const dur = this.data.duration || 1;
 
-    ctx.fillStyle = '#080816'; ctx.fillRect(0, 0, cssW, this.RULER_H);
-    ctx.strokeStyle = '#333'; ctx.lineWidth = 1;
+    ctx.fillStyle = C.ruler; ctx.fillRect(0, 0, cssW, this.RULER_H);
+    ctx.strokeStyle = C.grid; ctx.lineWidth = 1;
     ctx.beginPath(); ctx.moveTo(waveX, 0); ctx.lineTo(waveX, this.RULER_H); ctx.stroke();
     const hx = this.LOCK_W / 2, hy = this.RULER_H / 2 + 1;
-    ctx.strokeStyle = '#3a3a5a'; ctx.lineWidth = 1.2;
+    ctx.strokeStyle = C.text; ctx.lineWidth = 1.2;
     ctx.strokeRect(hx - 4, hy - 2, 8, 6);
     ctx.beginPath(); ctx.arc(hx, hy - 2, 2.5, Math.PI, 0); ctx.stroke();
 
     const tick = [0.1,0.5,1,2,5,10,30,60].find(m => dur/m <= 14) || 60;
-    ctx.fillStyle = '#666'; ctx.font = '9px monospace'; ctx.textAlign = 'center';
+    ctx.fillStyle = C.text; ctx.font = '9px monospace'; ctx.textAlign = 'center';
     for (let t = 0; t <= dur + tick*0.01; t += tick) {
       const rx = waveX + (t / dur) * waveW;
       ctx.beginPath(); ctx.moveTo(rx, this.RULER_H-4); ctx.lineTo(rx, this.RULER_H); ctx.stroke();
@@ -781,29 +814,29 @@ const WF = {
 
     vis.forEach((j, ri) => {
       const ry    = this.RULER_H + ri * this.ROW_H;
-      const rowBg = ri % 2 === 0 ? '#14142a' : '#0d0d1f';
+      const rowBg = ri % 2 === 0 ? C.bgAlt : C.bg;
       const color = j.group === 'face' ? this.FACE_COL : this.BODY_COL;
       const mapped = this.data.servo_mapped.includes(j.key);
       const vals   = this.data.data[j.key] || [];
 
       ctx.fillStyle = rowBg; ctx.fillRect(0, ry, cssW, this.ROW_H);
-      if (_locked[j.key]) { ctx.fillStyle = 'rgba(251,133,0,0.09)'; ctx.fillRect(0, ry, cssW, this.ROW_H); }
+      if (_locked[j.key]) { ctx.fillStyle = C.rgba('warning', 0.12); ctx.fillRect(0, ry, cssW, this.ROW_H); }
       if (mapped) { ctx.fillStyle = color; ctx.fillRect(0, ry, 3, this.ROW_H); }
-      if (WF.editMode && !_locked[j.key]) { ctx.fillStyle = 'rgba(76,201,240,0.04)'; ctx.fillRect(waveX, ry, waveW, this.ROW_H); }
-      if (WF._drawChannel === j.key) { ctx.fillStyle = 'rgba(76,201,240,0.10)'; ctx.fillRect(waveX, ry, waveW, this.ROW_H); }
+      if (WF.editMode && !_locked[j.key]) { ctx.fillStyle = C.rgba('info', 0.05); ctx.fillRect(waveX, ry, waveW, this.ROW_H); }
+      if (WF._drawChannel === j.key) { ctx.fillStyle = C.rgba('info', 0.12); ctx.fillRect(waveX, ry, waveW, this.ROW_H); }
       const lx = 4, lcy = ry + this.ROW_H / 2 - 1;
-      ctx.lineWidth = 1.5; ctx.strokeStyle = _locked[j.key] ? '#fb8500' : '#2a2a3a';
+      ctx.lineWidth = 1.5; ctx.strokeStyle = _locked[j.key] ? C.body : C.faint;
       ctx.strokeRect(lx, lcy, 10, 7);
       ctx.beginPath();
       _locked[j.key] ? ctx.arc(lx + 5, lcy, 3, Math.PI, 0) : ctx.arc(lx + 5, lcy, 3, Math.PI, Math.PI * 1.6);
       ctx.stroke();
 
       ctx.font = `${mapped ? 'bold ' : ''}10px sans-serif`;
-      ctx.fillStyle = mapped ? color : '#555';
+      ctx.fillStyle = mapped ? color : C.faint;
       ctx.textAlign = 'right';
       ctx.fillText(j.label, waveX - 6, ry + this.ROW_H/2 + 3);
 
-      ctx.strokeStyle = '#1e1e3a'; ctx.lineWidth = 1;
+      ctx.strokeStyle = C.grid; ctx.lineWidth = 1;
       ctx.beginPath(); ctx.moveTo(waveX, ry); ctx.lineTo(waveX, ry + this.ROW_H); ctx.stroke();
       ctx.beginPath(); ctx.moveTo(0, ry + this.ROW_H - 1); ctx.lineTo(cssW, ry + this.ROW_H - 1); ctx.stroke();
 
@@ -814,7 +847,7 @@ const WF = {
       const yFor = v => ry + this.ROW_H - this.PAD - ((v-lo)/span) * (this.ROW_H - 2*this.PAD);
 
       if (lo <= 0 && 0 <= hi) {
-        ctx.strokeStyle = '#2a2a50'; ctx.lineWidth = 1; ctx.setLineDash([3,4]);
+        ctx.strokeStyle = C.grid; ctx.lineWidth = 1; ctx.setLineDash([3,4]);
         ctx.beginPath(); ctx.moveTo(waveX, yFor(0)); ctx.lineTo(waveX+waveW, yFor(0)); ctx.stroke();
         ctx.setLineDash([]);
       }
@@ -839,10 +872,11 @@ const WF = {
     const ts   = this.data.timestamps[sIdx] ?? 0;
     const x    = waveX + (ts / Math.max(dur, 1e-6)) * waveW;
     const totalH = this.RULER_H + vis.length * this.ROW_H;
+    const C = themeColors();
 
-    ctx.strokeStyle = '#e63946'; ctx.lineWidth = 2;
+    ctx.strokeStyle = C.head; ctx.lineWidth = 2;
     ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, totalH); ctx.stroke();
-    ctx.fillStyle = '#e63946';
+    ctx.fillStyle = C.head;
     ctx.beginPath(); ctx.moveTo(x-5,0); ctx.lineTo(x+5,0); ctx.lineTo(x,9); ctx.closePath(); ctx.fill();
 
     const vals = vis.map(j => (this.data.data[j.key] || [])[sIdx] ?? 0);
@@ -856,7 +890,7 @@ const WF = {
       const span = hi - lo || 1;
       const t  = Math.max(0, Math.min(1, (v - lo) / span));
       const py = ry + this.ROW_H - this.PAD - t * (this.ROW_H - 2*this.PAD);
-      ctx.fillStyle = '#e63946';
+      ctx.fillStyle = C.head;
       ctx.beginPath(); ctx.arc(x, py, 3, 0, Math.PI*2); ctx.fill();
       ctx.fillStyle = color; ctx.font = '9px monospace';
       ctx.fillText((v >= 0 ? '+' : '') + v.toFixed(2), cssW - 2, ry + this.ROW_H/2 + 3);
@@ -942,7 +976,7 @@ function toggleEditMode() {
   const btn = document.getElementById('btn-edit-mode');
   if (btn) {
     btn.textContent  = WF.editMode ? '✎ Editing' : '✎ Draw';
-    btn.className    = 'pc-btn btn-sm ' + (WF.editMode ? 'btn-pause' : 'btn-ghost');
+    btn.className    = 'btn btn-sm ' + (WF.editMode ? 'btn-warning' : 'btn-outline-primary');
   }
   WF.draw();
 }
@@ -1002,7 +1036,7 @@ function openChannelEditor(key) {
   CE._drawing = false; CE._drawEdits = []; CE._drawSnapshot = null;
   document.getElementById('ce-btn-show-points').classList.add('active');
   const j = JOINTS.find(j => j.key === key);
-  CE.color = j ? (j.group === 'face' ? WF.FACE_COL : WF.BODY_COL) : '#4cc9f0';
+  CE.group = j ? j.group : 'face';
   document.getElementById('ce-title').textContent = j ? j.label : key;
   document.getElementById('ce-overlay').style.display = 'flex';
   document.getElementById('ce-locked-note').style.display = _locked[key] ? '' : 'none';
@@ -1086,10 +1120,10 @@ function ceSmooth() {
   _undoStack.push({channel: CE.key, edits: undoEdits}); updateUndoBtn();
   const edits = smoothed.map((v, i) => ({frame: i, value: v}));
   const msg = document.getElementById('ce-msg');
-  if (msg) { msg.style.color = '#888'; msg.textContent = 'Smoothing…'; }
+  if (msg) { msg.style.color = 'var(--muted)'; msg.textContent = 'Smoothing…'; }
   patchChannel(CE.key, edits).then(() => {
     ceLoadChannel(CE.key);
-    if (msg) { msg.style.color = '#06d6a0'; msg.textContent = '✓ Smoothed'; setTimeout(() => msg.textContent = '', 3000); }
+    if (msg) { msg.style.color = 'var(--green)'; msg.textContent = '✓ Smoothed'; setTimeout(() => msg.textContent = '', 3000); }
   });
 }
 
@@ -1152,10 +1186,11 @@ function ceDraw() {
   canvas.height = cssH * dpr;
   const ctx = canvas.getContext('2d');
   ctx.scale(dpr, dpr);
-  ctx.fillStyle = '#0d0d1f'; ctx.fillRect(0, 0, cssW, cssH);
+  const C = themeColors();
+  ctx.fillStyle = C.bg; ctx.fillRect(0, 0, cssW, cssH);
 
   if (!CE.full || !CE.full.ok || !CE.full.total_frames) {
-    ctx.fillStyle = '#555'; ctx.font = '13px sans-serif'; ctx.textAlign = 'center';
+    ctx.fillStyle = C.faint; ctx.font = '13px sans-serif'; ctx.textAlign = 'center';
     ctx.fillText('No data', cssW / 2, cssH / 2);
     return;
   }
@@ -1165,10 +1200,10 @@ function ceDraw() {
   const vals  = CE.full.values;
   const ts    = CE.full.timestamps;
 
-  ctx.fillStyle = '#080816'; ctx.fillRect(0, 0, cssW, CE.RULER_H);
+  ctx.fillStyle = C.ruler; ctx.fillRect(0, 0, cssW, CE.RULER_H);
   const tick = [0.1,0.5,1,2,5,10,30,60].find(m => dur/m <= 14) || 60;
-  ctx.strokeStyle = '#333'; ctx.lineWidth = 1;
-  ctx.fillStyle = '#666'; ctx.font = '10px monospace'; ctx.textAlign = 'center';
+  ctx.strokeStyle = C.grid; ctx.lineWidth = 1;
+  ctx.fillStyle = C.text; ctx.font = '10px monospace'; ctx.textAlign = 'center';
   for (let t = 0; t <= dur + tick*0.01; t += tick) {
     const rx = (t / dur) * waveW;
     ctx.beginPath(); ctx.moveTo(rx, CE.RULER_H-5); ctx.lineTo(rx, CE.RULER_H); ctx.stroke();
@@ -1183,12 +1218,12 @@ function ceDraw() {
   const yFor = v => top + areaH - CE.PAD - ((v-lo)/span) * (areaH - 2*CE.PAD);
 
   if (lo <= 0 && 0 <= hi) {
-    ctx.strokeStyle = '#2a2a50'; ctx.lineWidth = 1; ctx.setLineDash([4,5]);
+    ctx.strokeStyle = C.grid; ctx.lineWidth = 1; ctx.setLineDash([4,5]);
     ctx.beginPath(); ctx.moveTo(0, yFor(0)); ctx.lineTo(waveW, yFor(0)); ctx.stroke();
     ctx.setLineDash([]);
   }
 
-  ctx.strokeStyle = CE.color || '#4cc9f0'; ctx.lineWidth = 1.5; ctx.beginPath();
+  ctx.strokeStyle = CE.group === 'body' ? C.body : C.face; ctx.lineWidth = 1.5; ctx.beginPath();
   ts.forEach((t, i) => {
     const x = (t / dur) * waveW, y = yFor(vals[i] ?? 0);
     i === 0 ? ctx.moveTo(x, y) : ctx.lineTo(x, y);
@@ -1196,7 +1231,7 @@ function ceDraw() {
   ctx.stroke();
 
   if (CE.points.length && CE.showPoints) {
-    ctx.strokeStyle = '#fff'; ctx.lineWidth = 1.2; ctx.setLineDash([5,4]);
+    ctx.strokeStyle = C.strong; ctx.lineWidth = 1.2; ctx.setLineDash([5,4]);
     ctx.beginPath();
     CE.points.forEach((p, i) => {
       const x = ((ts[p.frame] ?? 0) / dur) * waveW, y = yFor(p.value);
@@ -1205,17 +1240,17 @@ function ceDraw() {
     ctx.stroke(); ctx.setLineDash([]);
     CE.points.forEach(p => {
       const x = ((ts[p.frame] ?? 0) / dur) * waveW, y = yFor(p.value);
-      ctx.fillStyle = CE.tool === 'scissors' ? '#e63946' : '#fff';
+      ctx.fillStyle = CE.tool === 'scissors' ? C.head : C.strong;
       ctx.beginPath(); ctx.arc(x, y, 5, 0, Math.PI*2); ctx.fill();
     });
   }
 
   const frameIdx = Math.min(Math.max(0, Math.round(WF.cursor || 0)), CE.full.total_frames - 1);
   const px = ((ts[frameIdx] ?? 0) / dur) * waveW;
-  ctx.strokeStyle = '#e63946'; ctx.lineWidth = 2;
+  ctx.strokeStyle = C.head; ctx.lineWidth = 2;
   ctx.beginPath(); ctx.moveTo(px, 0); ctx.lineTo(px, cssH); ctx.stroke();
   const v = vals[frameIdx] ?? 0;
-  ctx.fillStyle = '#e63946'; ctx.font = '11px monospace'; ctx.textAlign = 'left';
+  ctx.fillStyle = C.head; ctx.font = '11px monospace'; ctx.textAlign = 'left';
   ctx.fillText((v >= 0 ? '+' : '') + v.toFixed(3), waveW + 6, top + 14);
 }
 
@@ -1384,7 +1419,7 @@ function buildJointTable(ports, jointMap) {
   for (const j of JOINTS) {
     if (j.group !== lastGroup) {
       lastGroup = j.group;
-      const color = j.group === 'face' ? '#4cc9f0' : '#fb8500';
+      const color = j.group === 'face' ? 'var(--cyan)' : 'var(--amber)';
       const label = j.group === 'face' ? 'Face' : 'Body';
       const collapsed = localStorage.getItem('pc-jm-group-' + j.group) === 'closed';
       rows.push(`<tr class="jm-grp-hdr" data-group-hdr="${j.group}" onclick="toggleJmGroup('${j.group}')">
@@ -1399,7 +1434,7 @@ function buildJointTable(ports, jointMap) {
     const opts = portOpts.replace(`value="${sel}"`, `value="${sel}" selected`);
     const collapsedRow = localStorage.getItem('pc-jm-group-' + j.group) === 'closed';
     rows.push(`<tr data-group="${j.group}" class="${collapsedRow ? 'jm-row-collapsed' : ''}">
-      <td style="color:${j.group==='face'?'#4cc9f0':'#fb8500'}; font-size:11px;">${j.label}</td>
+      <td class="jm-${j.group}" style="font-size:11px;">${j.label}</td>
       <td><div style="display:flex; align-items:center; gap:6px;">
         <div class="jm-bar-bg"><div class="jm-bar" id="jm-bar-${j.key}"></div></div>
         <span class="jm-val" id="jm-val-${j.key}">—</span>
@@ -1469,7 +1504,7 @@ function saveJointMap() {
     body: JSON.stringify({joint_map: map})
   }).then(r => r.json()).then(d => {
     const el = document.getElementById('jm-msg');
-    el.style.color = d.ok ? '#06d6a0' : '#e63946';
+    el.style.color = d.ok ? 'var(--green)' : 'var(--red)';
     el.textContent = d.ok ? `✓ Saved ${Object.keys(map).length} mapping(s)` : '✗ ' + JSON.stringify(d);
     setTimeout(() => el.textContent = '', 4000);
     if (d.ok && WF.data) WF.data.servo_mapped = Object.keys(map);
@@ -1489,7 +1524,7 @@ function setLiveBtn(on) {
   const btn = document.getElementById('btn-live');
   if (!btn) return;
   btn.textContent = on ? '⏹ Stop Live Test' : '▶ Start Live Test';
-  btn.className   = 'pc-btn btn-live-main ' + (on ? 'btn-live-on' : 'btn-live-off');
+  btn.className   = 'btn btn-live-main ' + (on ? 'btn-success btn-live-on' : 'btn-outline-secondary btn-live-off');
 }
 
 // ── Smoothing ─────────────────────────────────────────────────────────────────
@@ -1502,7 +1537,7 @@ function saveSmoothing() {
     })
   }).then(r => r.json()).then(d => {
     const el = document.getElementById('settings-msg');
-    el.style.color = d.ok ? '#06d6a0' : '#e63946';
+    el.style.color = d.ok ? 'var(--green)' : 'var(--red)';
     el.textContent = d.ok ? '✓ Saved' : '✗ Error';
     setTimeout(() => el.textContent = '', 3000);
   });
@@ -1546,8 +1581,8 @@ function tlToggleLoop() {
 function _updateTlButtons() {
   const hBtn = document.getElementById('btn-tl-half');
   const lBtn = document.getElementById('btn-tl-loop');
-  if (hBtn) { hBtn.className = 'pc-btn btn-sm ' + (TL.speed !== 1.0 ? 'btn-pause' : 'btn-ghost'); hBtn.textContent = TL.speed !== 1.0 ? '½× ON' : '½×'; }
-  if (lBtn) { lBtn.className = 'pc-btn btn-sm ' + (TL.loop ? 'btn-play' : 'btn-ghost'); lBtn.textContent = TL.loop ? '↻ Loop ON' : '↻ Loop'; }
+  if (hBtn) { hBtn.className = 'btn btn-sm ' + (TL.speed !== 1.0 ? 'btn-warning' : 'btn-outline-primary'); hBtn.textContent = TL.speed !== 1.0 ? '½× ON' : '½×'; }
+  if (lBtn) { lBtn.className = 'btn btn-sm ' + (TL.loop ? 'btn-success' : 'btn-outline-primary'); lBtn.textContent = TL.loop ? '↻ Loop ON' : '↻ Loop'; }
 }
 
 // ── Recording ─────────────────────────────────────────────────────────────────
@@ -1706,34 +1741,34 @@ function loadAudioDevices() {
 
 function testAudio() {
   const el = document.getElementById('audio-msg');
-  el.style.color = '#888'; el.textContent = 'Testing…';
+  el.style.color = 'var(--muted)'; el.textContent = 'Testing…';
   if (_audioOutput === 'browser') {
     const file = (document.getElementById('audio-sel') || {}).value || '';
     if (!file) {
-      el.style.color='#fb8500'; el.textContent='⚠ No audio file selected';
+      el.style.color='var(--amber)'; el.textContent='⚠ No audio file selected';
       setTimeout(() => el.textContent='', 4000); return;
     }
     _syncAudio('play', 0);
-    el.style.color='#06d6a0'; el.textContent='✓ Playing via browser';
+    el.style.color='var(--green)'; el.textContent='✓ Playing via browser';
     setTimeout(() => { _syncAudio('stop'); el.textContent=''; }, 4000);
     return;
   }
   fetch(API+'/api/audio/test', {method:'POST'})
     .then(r=>r.json()).then(d => {
       if (!d.player) {
-        el.style.color='#e63946';
+        el.style.color='var(--red)';
         el.textContent = '✗ No audio player found on device (ffplay/mpv/cvlc/mpg123)';
       } else if (!d.path_exists) {
-        el.style.color='#e63946';
+        el.style.color='var(--red)';
         el.textContent = `✗ File not found: ${d.path}`;
       } else if (!d.audio_file) {
-        el.style.color='#fb8500';
+        el.style.color='var(--amber)';
         el.textContent = '⚠ No audio file selected';
       } else if (d.launched) {
-        el.style.color='#06d6a0';
+        el.style.color='var(--green)';
         el.textContent = `✓ Playing via ${d.player} on ${d.audio_output}`;
       } else {
-        el.style.color='#e63946';
+        el.style.color='var(--red)';
         el.textContent = `✗ Launch failed: ${d.error||'unknown'}`;
       }
       setTimeout(() => el.textContent='', 6000);
@@ -1746,7 +1781,7 @@ function setAudioFile(filename) {
     body: JSON.stringify({audio_file: filename})
   }).then(r=>r.json()).then(d => {
     const el = document.getElementById('audio-msg');
-    el.style.color = d.ok ? '#06d6a0' : '#e63946';
+    el.style.color = d.ok ? 'var(--green)' : 'var(--red)';
     el.textContent = d.ok ? (filename ? `✓ ${filename}` : '✓ No audio') : '✗ Error';
     setTimeout(() => el.textContent = '', 3000);
     const ae = document.getElementById('audio-player');
@@ -1761,7 +1796,7 @@ function setAudioOutput(value) {
     body: JSON.stringify({audio_output: value})
   }).then(r=>r.json()).then(d => {
     const el = document.getElementById('audio-msg');
-    el.style.color = d.ok ? '#06d6a0' : '#e63946';
+    el.style.color = d.ok ? 'var(--green)' : 'var(--red)';
     el.textContent = d.ok ? '✓ Output saved' : '✗ Error';
     setTimeout(() => el.textContent = '', 3000);
   });
@@ -1786,7 +1821,7 @@ function sessDelete() {
 
 function showMsg(msg, ok=true) {
   const el = document.getElementById('status-msg');
-  el.style.color = ok ? '#06d6a0' : '#e63946';
+  el.style.color = ok ? 'var(--green)' : 'var(--red)';
   el.textContent = msg;
   setTimeout(() => el.textContent='', 5000);
 }
@@ -1795,13 +1830,13 @@ function showMsg(msg, ok=true) {
 function testServoOutput() {
   ['servo-test-msg', 'jm-test-msg'].forEach(id => {
     const el = document.getElementById(id);
-    if (el) { el.style.color = '#888'; el.textContent = 'Testing…'; }
+    if (el) { el.style.color = 'var(--muted)'; el.textContent = 'Testing…'; }
   });
   fetch(API + '/api/servo/test', {method: 'POST'})
     .then(r => r.json())
     .then(d => {
       const msg   = d.ok ? `✓ Center sent to ${d.ports} port(s)` : '✗ ' + d.error;
-      const color = d.ok ? '#06d6a0' : '#e63946';
+      const color = d.ok ? 'var(--green)' : 'var(--red)';
       ['servo-test-msg', 'jm-test-msg'].forEach(id => {
         const el = document.getElementById(id);
         if (el) { el.style.color = color; el.textContent = msg; }
@@ -1815,7 +1850,7 @@ function testServoOutput() {
     }).catch(() => {
       ['servo-test-msg', 'jm-test-msg'].forEach(id => {
         const el = document.getElementById(id);
-        if (el) { el.style.color = '#e63946'; el.textContent = '✗ Daemon unreachable'; }
+        if (el) { el.style.color = 'var(--red)'; el.textContent = '✗ Daemon unreachable'; }
       });
     });
 }
@@ -1827,26 +1862,26 @@ function exportFseq() {
   const msg     = document.getElementById('fseq-msg');
   const mapBox  = document.getElementById('fseq-ch-map');
   const mapInner= document.getElementById('fseq-ch-map-inner');
-  msg.style.color='#888'; msg.textContent='Exporting…'; mapBox.style.display='none';
+  msg.style.color='var(--muted)'; msg.textContent='Exporting…'; mapBox.style.display='none';
   fetch(API+'/api/config', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({step_time_ms:step_ms})});
   fetch(API+'/api/export', {method:'POST', headers:{'Content-Type':'application/json'},
         body:JSON.stringify({filename:name, step_time_ms:step_ms})})
     .then(r=>r.json()).then(d => {
       if (d.ok) {
-        msg.style.color='#06d6a0';
+        msg.style.color='var(--green)';
         msg.textContent=`✓ ${d.frames} frames · ${d.duration}s · ${d.channels} ch · Ready in FPP scheduler`;
         if (JM_ports.length > 0) {
           mapInner.innerHTML = JM_ports.map(p => {
             const ch  = p.fpp_channel;
             const ch2 = p.data_type === 2
-              ? `&ndash;<strong style="color:#4cc9f0;">${ch+1}</strong> (16-bit)` : ' (8-bit)';
-            return `<div style="padding:2px 0;">Port ${p.port} <span style="color:#e0e0e0;">${p.desc||''}</span>`
-              + ` &rarr; FPP ch <strong style="color:#4cc9f0;">${ch}</strong>${ch2}</div>`;
+              ? `&ndash;<strong style="color:var(--cyan);">${ch+1}</strong> (16-bit)` : ' (8-bit)';
+            return `<div style="padding:2px 0;">Port ${p.port} <span style="color:var(--fg);">${p.desc||''}</span>`
+              + ` &rarr; FPP ch <strong style="color:var(--cyan);">${ch}</strong>${ch2}</div>`;
           }).join('');
           mapBox.style.display = 'block';
         }
         markExported();
-      } else { msg.style.color='#e63946'; msg.textContent='✗ '+d.error; }
+      } else { msg.style.color='var(--red)'; msg.textContent='✗ '+d.error; }
     });
 }
 
@@ -1862,24 +1897,24 @@ function exportXlights() {
   const step_ms = getStepTimeMs();
   const msg     = document.getElementById('xsq-msg');
   const dl      = document.getElementById('xsq-downloads');
-  msg.style.color='#888'; msg.textContent='Exporting…'; dl.style.display='none';
+  msg.style.color='var(--muted)'; msg.textContent='Exporting…'; dl.style.display='none';
   fetch(API+'/api/config', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({step_time_ms:step_ms})});
   fetch(API+'/api/export/xsq', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({filename:name, step_time_ms:step_ms})})
     .then(r=>r.json()).then(d => {
       if (d.ok) {
-        msg.style.color='#06d6a0';
+        msg.style.color='var(--green)';
         msg.textContent=`✓ ${d.frames} frames · ${d.duration}s · ${d.channels} ch`;
         dl.innerHTML='';
         if (d.xsq_filename) {
           const a = document.createElement('a');
           a.href=API+'/api/sequence/download/'+encodeURIComponent(d.xsq_filename);
-          a.className='pc-btn btn-ghost'; a.textContent='↓ '+d.xsq_filename; a.download=d.xsq_filename;
+          a.className='btn btn-outline-primary'; a.textContent='↓ '+d.xsq_filename; a.download=d.xsq_filename;
           dl.appendChild(a);
         }
         dl.style.display='flex';
         markExported();
-        if (d.xsq_error) { msg.textContent+='  (XSQ: '+d.xsq_error+')'; msg.style.color='#fb8500'; }
-      } else { msg.style.color='#e63946'; msg.textContent='✗ '+d.error; }
+        if (d.xsq_error) { msg.textContent+='  (XSQ: '+d.xsq_error+')'; msg.style.color='var(--amber)'; }
+      } else { msg.style.color='var(--red)'; msg.textContent='✗ '+d.error; }
     });
 }
 
@@ -1888,7 +1923,7 @@ function pollStatus() {
   return fetch(API+'/api/status').then(r=>r.json()).then(s => {
     const recBadge = document.getElementById('badge-rec');
     recBadge.textContent = s.recording ? '● REC' : 'IDLE';
-    recBadge.className   = 'pc-badge '+(s.recording ? 'badge-rec' : 'badge-idle');
+    recBadge.className   = 'badge '+(s.recording ? 'text-bg-danger badge-rec' : 'text-bg-secondary');
     document.getElementById('btn-rec').style.display  = s.recording ? 'none':'';
     document.getElementById('btn-srec').style.display = s.recording ? '':'none';
     document.getElementById('rec-info').innerHTML = s.duration_str+' &nbsp;·&nbsp; '+s.frame_count+' frames';
@@ -2032,29 +2067,29 @@ function claimCamera(isAuto = false) {
   _camAutoInFlight = true;
   if (isAuto) _camAutoAttempts++;
   const msg = document.getElementById('cam-claim-msg');
-  if (msg) { msg.style.color='#888'; msg.textContent='Releasing from Live Follow…'; }
+  if (msg) { msg.style.color='var(--muted)'; msg.textContent='Releasing from Live Follow…'; }
   fetch('/fpp-live-follow-api/api/camera/release', {method:'POST'}).catch(()=>null)
     .then(() => { if (msg) msg.textContent='Opening camera…'; return fetch(API+'/api/camera/retry', {method:'POST'}); })
     .then(r=>r.json()).then(d => {
       _camAutoInFlight = false;
       if (d.cam_running) {
         _camAutoAttempts = 0;
-        if (msg) { msg.style.color='#06d6a0'; msg.textContent='✓ Camera claimed'; }
+        if (msg) { msg.style.color='var(--green)'; msg.textContent='✓ Camera claimed'; }
         const recoveryBar = document.getElementById('cam-recovery-bar');
         if (recoveryBar) recoveryBar.style.display = 'none';
-      } else if (msg) { msg.style.color='#e63946'; msg.textContent='✗ Camera still unavailable'; }
+      } else if (msg) { msg.style.color='var(--red)'; msg.textContent='✗ Camera still unavailable'; }
     }).catch(() => {
       _camAutoInFlight = false;
-      if (msg) { msg.style.color='#e63946'; msg.textContent='✗ Could not reach daemon'; }
+      if (msg) { msg.style.color='var(--red)'; msg.textContent='✗ Could not reach daemon'; }
     });
 }
 
 function restoreLiveFollow() {
   const msg = document.getElementById('cam-claim-msg');
-  msg.style.color='#888'; msg.textContent='Restoring Live Follow camera…';
+  msg.style.color='var(--muted)'; msg.textContent='Restoring Live Follow camera…';
   fetch('/fpp-live-follow-api/api/camera/restore', {method:'POST'})
-    .then(() => { msg.style.color='#06d6a0'; msg.textContent='✓ Restored'; })
-    .catch(() => { msg.style.color='#e63946'; msg.textContent='✗ Could not reach Live Follow'; });
+    .then(() => { msg.style.color='var(--green)'; msg.textContent='✓ Restored'; })
+    .catch(() => { msg.style.color='var(--red)'; msg.textContent='✗ Could not reach Live Follow'; });
 }
 
 // ── Init ──────────────────────────────────────────────────────────────────────
