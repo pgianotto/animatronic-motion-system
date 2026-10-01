@@ -7,6 +7,7 @@ into FPP's sequences folder so files appear in FPP's scheduler immediately.
 import bisect
 import http.client
 import json
+import logging
 import queue
 import os
 import re
@@ -39,6 +40,8 @@ FSEQ_DIR  = Path('/home/fpp/media/sequences')
 SESS_DIR  = Path('/home/fpp/media/animations')
 MEDIA_DIR = Path('/home/fpp/media/music')
 PORT      = 5002
+STREAM_IDLE_TIMEOUT = 5.0   # seconds with the camera stopped before /stream ends
+CAM_LOST_TIMEOUT    = 2.0   # seconds of failed reads before the camera is treated as lost
 
 
 def _tee_stdio_to_fpp_log():
@@ -443,6 +446,9 @@ class CaptureDaemon:
         self._audio_proc: subprocess.Popen = None
         self._rerecord_snapshot: list = []
         self._rerecord_locked:   set  = set()
+        self._cam_running    = False
+        self._cam_error      = ''
+        self._cam_start_lock = threading.Lock()   # several open pages may retry at once
 
         self._start_components()
         self._start_camera_thread()
@@ -482,17 +488,54 @@ class CaptureDaemon:
         self._writer = OverlayWriter(out) if out else None
 
     def _start_camera_thread(self):
-        if not self._camera.start():
-            print('[Capture] Camera failed to open.')
-            return
-        self._cam_running = True
-        threading.Thread(target=self._cam_loop, daemon=True).start()
+        with self._cam_start_lock:
+            if self._cam_running:
+                return
+            if not self._camera.start():
+                self._set_cam_error('not_found' if self._camera_missing() else 'busy')
+                return
+            self._cam_error = ''
+            self._cam_running = True
+            threading.Thread(target=self._cam_loop, daemon=True).start()
+
+    def _set_cam_error(self, err: str):
+        if err != self._cam_error:   # page retries every 10 s; log changes only
+            print(f'[Capture] Camera unavailable ({err}).')
+        self._cam_error = err
+
+    def _camera_missing(self) -> bool:
+        """True when the configured camera's device node doesn't exist, i.e.
+        nothing is plugged in (as opposed to a device another process holds)."""
+        index = self._camera.index
+        if isinstance(index, str) and index.isdigit():
+            index = int(index)
+        if isinstance(index, int):
+            return not os.path.exists(f'/dev/video{index}')
+        if isinstance(index, str) and index.startswith('/dev/'):
+            return not os.path.exists(index)
+        return False
 
     def _cam_loop(self):
+        fail_since = None
         while self._cam_running:
             ok, frame = self._camera.read()
             if not ok or frame is None:
+                # A camera unplugged mid-run fails every read. Give up after
+                # CAM_LOST_TIMEOUT so the page sees cam_running=False and its
+                # slow retry picks the camera up again when it's reconnected.
+                now = time.monotonic()
+                fail_since = fail_since or now
+                if now - fail_since >= CAM_LOST_TIMEOUT:
+                    with self._cam_start_lock:
+                        if self._cam_running:   # not already released via the API
+                            self._cam_running = False
+                            self._camera.stop()
+                            self._clear_frame()
+                            self._set_cam_error('not_found' if self._camera_missing() else 'busy')
+                    return
+                time.sleep(0.05)   # avoid spinning a core while reads fail
                 continue
+            fail_since = None
             result = self._tracker.process(frame)
             with self._lock:
                 vals = self._capture.update(result)
@@ -951,21 +994,49 @@ class CaptureDaemon:
             'audio_file':      self.cfg.get('audio_file', ''),
             'audio_output':    self.cfg.get('audio_output', 'browser'),
             'cam_running':     getattr(self, '_cam_running', False),
+            'cam_error':       getattr(self, '_cam_error', ''),
             'writer_ok':       self._writer is not None,
             'joint_map_count': len(self.cfg.get('joint_map', {})),
         }
 
+    def _clear_frame(self):
+        """Drop the last frame so a reopened stream doesn't show a stale image."""
+        with self._frame_lock:
+            self._latest_jpg = b''
+
     def mjpeg_frames(self):
+        # Only send new frames, and end the stream once the camera has been
+        # stopped for STREAM_IDLE_TIMEOUT, so a missing or released camera
+        # doesn't hold the connection (and a server thread) open forever. The
+        # page reopens the stream when cam_running goes back to True, so the
+        # stream is kept open while the camera runs, even through slow frames.
+        last_jpg   = None
+        stopped_at = None
         while True:
+            if self._cam_running:
+                stopped_at = None
+            elif stopped_at is None:
+                stopped_at = time.monotonic()
+            elif time.monotonic() - stopped_at >= STREAM_IDLE_TIMEOUT:
+                return
             with self._frame_lock:
                 jpg = self._latest_jpg
-            if jpg:
+            if jpg and jpg is not last_jpg:
+                last_jpg = jpg
                 yield (b'--frame\r\nContent-Type: image/jpeg\r\n\r\n'
                        + jpg + b'\r\n')
             time.sleep(0.033)
 
 
 # ── Flask ─────────────────────────────────────────────────────────────────────
+
+class _QuietStatusPolls(logging.Filter):
+    """The page polls /api/status twice a second; keep those out of the log."""
+    def filter(self, record):
+        return '/api/status' not in record.getMessage()
+
+
+logging.getLogger('werkzeug').addFilter(_QuietStatusPolls())
 
 app    = Flask(__name__)
 daemon = CaptureDaemon()
@@ -1198,10 +1269,12 @@ def api_set_cfg():
 @app.route('/api/camera/release', methods=['POST'])
 def api_cam_release():
     """Stop the camera thread so another daemon can claim the device."""
-    daemon._cam_running = False
-    time.sleep(0.15)
-    if daemon._camera:
-        daemon._camera.stop()
+    with daemon._cam_start_lock:
+        daemon._cam_running = False
+        time.sleep(0.15)
+        if daemon._camera:
+            daemon._camera.stop()
+        daemon._clear_frame()
     return jsonify({'ok': True})
 
 
@@ -1210,7 +1283,8 @@ def api_cam_retry():
     """Retry opening the camera — call after live-follow releases it."""
     if not getattr(daemon, '_cam_running', False):
         daemon._start_camera_thread()
-    return jsonify({'ok': True, 'cam_running': getattr(daemon, '_cam_running', False)})
+    return jsonify({'ok': True, 'cam_running': getattr(daemon, '_cam_running', False),
+                    'cam_error': getattr(daemon, '_cam_error', '')})
 
 
 @app.route('/stream')

@@ -378,9 +378,9 @@ $step_time_ms = intval($cfg['step_time_ms'] ?? 50);
     <!-- Manual fallback — only shown after automatic reconnect attempts are exhausted -->
     <div id="cam-recovery-bar" style="display:none; padding:8px 10px; background:var(--dark);
          border-top:1px solid #2a2a4a; gap:8px; align-items:center; flex-wrap:wrap;">
-      <span style="color:var(--amber); font-size:11px;">Camera still busy (held by Live Follow)</span>
+      <span id="cam-recovery-text" style="color:var(--amber); font-size:11px;">Camera still busy (held by Live Follow)</span>
       <button class="pc-btn btn-play  btn-sm" onclick="claimCamera()">Try Again</button>
-      <button class="pc-btn btn-ghost btn-sm" onclick="restoreLiveFollow()">Use Live Follow Instead</button>
+      <button class="pc-btn btn-ghost btn-sm" id="cam-restore-lf" onclick="restoreLiveFollow()">Use Live Follow Instead</button>
       <span id="cam-claim-msg" class="pc-msg" style="margin:0;"></span>
     </div>
   </div>
@@ -651,8 +651,19 @@ function switchTab(name) {
   // Only keep one MJPEG connection open at a time
   const mapImg = document.getElementById('map-test-stream');
   const recImg = document.getElementById('rec-stream');
-  if (mapImg) mapImg.src = (name === 'map-test') ? STREAM_URL : '';
-  if (recImg) recImg.src = (name === 'record')   ? STREAM_URL : '';
+  if (mapImg) { mapImg.src = (name === 'map-test') ? STREAM_URL : ''; mapImg.style.display = ''; }
+  if (recImg) { recImg.src = (name === 'record')   ? STREAM_URL : ''; recImg.style.display = ''; }
+}
+
+// /stream ends a few seconds after frames stop (camera missing or released),
+// so reopen it on whichever preview is currently showing it.
+function reopenStreams() {
+  ['map-test-stream', 'rec-stream'].forEach(id => {
+    const img = document.getElementById(id);
+    if (!img || !img.getAttribute('src')) return;
+    img.style.display = '';
+    img.src = STREAM_URL + '?t=' + Date.now();
+  });
 }
 
 // ── Stepper (done-state on the tabs themselves) ───────────────────────────────
@@ -1956,29 +1967,65 @@ function pollStatus() {
 // 3 times; only surfaces a manual fallback if all auto-attempts fail. Handing the
 // camera back to Live Follow, however, is never automatic — that's a deliberate
 // user action via restoreLiveFollow().
+// If no camera is plugged in at all (daemon reports cam_error 'not_found', also
+// after an unplug mid-run), it skips those attempts, shows the bar right away and
+// keeps checking every CAM_SLOW_RETRY_MS so a camera connected later is picked
+// up without a reload. That slow check never touches Live Follow.
 let _camAutoAttempts = 0;
 let _camAutoInFlight  = false;
+let _camWasRunning    = null;
+let _camLastSlowRetry = 0;
+const CAM_SLOW_RETRY_MS = 10000;
 
 function handleCameraOwnership(s) {
   const badge = document.getElementById('cam-status-badge');
   const recoveryBar = document.getElementById('cam-recovery-bar');
 
   if (s.cam_running) {
+    if (_camWasRunning === false) reopenStreams();
+    _camWasRunning = true;
     _camAutoAttempts = 0;
     if (badge) badge.style.display = 'none';
     if (recoveryBar) recoveryBar.style.display = 'none';
     return;
   }
+  _camWasRunning = false;
 
-  if (recoveryBar && recoveryBar.style.display !== 'none') return; // manual fallback already showing
+  if (recoveryBar && recoveryBar.style.display !== 'none') { // manual fallback already showing
+    updateRecoveryText(s.cam_error);
+    if (s.cam_error === 'not_found') retryMissingCamera();
+    return;
+  }
 
-  if (_camAutoAttempts < 3 && !_camAutoInFlight) {
+  // Nothing plugged in: releasing Live Follow can't help, so skip the fast
+  // claims (which call its release endpoint) and go straight to the slow retry.
+  const missing = s.cam_error === 'not_found';
+  if (!missing && _camAutoAttempts < 3 && !_camAutoInFlight) {
     if (badge) { badge.textContent = 'Reconnecting camera…'; badge.style.display = ''; }
     claimCamera(true);
-  } else if (_camAutoAttempts >= 3) {
+  } else if (missing || _camAutoAttempts >= 3) {
     if (badge) badge.style.display = 'none';
+    updateRecoveryText(s.cam_error);
     if (recoveryBar) recoveryBar.style.display = 'flex';
   }
+}
+
+function updateRecoveryText(camError) {
+  const text = document.getElementById('cam-recovery-text');
+  const lfBtn = document.getElementById('cam-restore-lf');
+  const missing = camError === 'not_found';
+  if (text) text.textContent = missing
+    ? 'No camera detected. Plug one in; it will be picked up automatically.'
+    : 'Camera still busy (held by Live Follow)';
+  if (lfBtn) lfBtn.style.display = missing ? 'none' : '';
+}
+
+function retryMissingCamera() {
+  if (_camAutoInFlight || Date.now() - _camLastSlowRetry < CAM_SLOW_RETRY_MS) return;
+  _camLastSlowRetry = Date.now();
+  _camAutoInFlight = true;
+  fetch(API+'/api/camera/retry', {method:'POST'}).catch(()=>null)
+    .then(() => { _camAutoInFlight = false; });
 }
 
 function claimCamera(isAuto = false) {

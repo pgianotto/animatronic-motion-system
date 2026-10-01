@@ -15,6 +15,7 @@ class Camera:
     def start(self) -> bool:
         self._cap = cv2.VideoCapture(self.index)
         if not self._cap.isOpened():
+            self.stop()   # callers may retry often; don't leave failed captures behind
             return False
         self._cap.set(cv2.CAP_PROP_FRAME_WIDTH, self.width)
         self._cap.set(cv2.CAP_PROP_FRAME_HEIGHT, self.height)
